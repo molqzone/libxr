@@ -22,15 +22,23 @@ class MSPM0ADC : public ADC
   float Read() override;
 
  private:
-  static constexpr uint32_t WAIT_TIMEOUT = 300000;
+  static constexpr uint8_t DMA_CHANNEL_INVALID = 0xFF;
+
+  float ReadByPolling();
+
+  float ReadByDMA();
 
   Resources res_;
   float scale_;
+  bool use_dma_;
+  uint8_t dma_channel_id_;
+  uint16_t dma_sample_;
 };
 
-#define MSPM0_ADC_INIT(name)                                                    \
-  ::LibXR::MSPM0ADC::Resources{(name##_INST), (name##_ADCMEM_0),               \
-                               static_cast<float>(name##_ADCMEM_0_REF_VOLTAGE_V)}
+#define MSPM0_ADC_INIT(name)                                                            \
+  ::LibXR::MSPM0ADC::Resources                                                          \
+  {                                                                                     \
+    (name##_INST), (name##_ADCMEM_0), static_cast<float>(name##_ADCMEM_0_REF_VOLTAGE_V) \
+  }
 
 }  // namespace LibXR
-
