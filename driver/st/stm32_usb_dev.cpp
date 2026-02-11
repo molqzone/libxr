@@ -16,9 +16,12 @@ stm32_usb_dev_id_t STM32USBDeviceGetID(PCD_HandleTypeDef *hpcd)
   return STM32_USB_DEV_ID_NUM;
 }
 
-extern "C" void HAL_PCD_SOFCallback(PCD_HandleTypeDef *hpcd) { UNUSED(hpcd); }
+extern "C" __attribute__((weak)) void HAL_PCD_SOFCallback(PCD_HandleTypeDef *hpcd)
+{
+  UNUSED(hpcd);
+}
 
-extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
+extern "C" __attribute__((weak)) void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -42,7 +45,7 @@ extern "C" void HAL_PCD_SetupStageCallback(PCD_HandleTypeDef *hpcd)
   usb->OnSetupPacket(true, reinterpret_cast<USB::SetupPacket *>(hpcd->Setup));
 }
 
-extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
+extern "C" __attribute__((weak)) void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -59,7 +62,7 @@ extern "C" void HAL_PCD_ResetCallback(PCD_HandleTypeDef *hpcd)
   usb->Init(true);
 }
 
-extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
+extern "C" __attribute__((weak)) void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -74,7 +77,7 @@ extern "C" void HAL_PCD_SuspendCallback(PCD_HandleTypeDef *hpcd)
   usb->Deinit(true);
 }
 
-extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
+extern "C" __attribute__((weak)) void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -89,9 +92,15 @@ extern "C" void HAL_PCD_ResumeCallback(PCD_HandleTypeDef *hpcd)
   usb->Init(true);
 }
 
-extern "C" void HAL_PCD_ConnectCallback(PCD_HandleTypeDef *hpcd) { UNUSED(hpcd); }
+extern "C" __attribute__((weak)) void HAL_PCD_ConnectCallback(PCD_HandleTypeDef *hpcd)
+{
+  UNUSED(hpcd);
+}
 
-extern "C" void HAL_PCD_DisconnectCallback(PCD_HandleTypeDef *hpcd) { UNUSED(hpcd); }
+extern "C" __attribute__((weak)) void HAL_PCD_DisconnectCallback(PCD_HandleTypeDef *hpcd)
+{
+  UNUSED(hpcd);
+}
 
 #if (defined(USB_OTG_FS))
 

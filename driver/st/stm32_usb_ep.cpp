@@ -344,7 +344,8 @@ static STM32Endpoint* GetEndpoint(PCD_HandleTypeDef* hpcd, uint8_t epnum, bool i
   return nullptr;
 }
 
-extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
+extern "C" __attribute__((weak)) void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd,
+                                                                   uint8_t epnum)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -360,7 +361,8 @@ extern "C" void HAL_PCD_DataInStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epn
   ep->OnTransferCompleteCallback(true, ep->last_transfer_size_);
 }
 
-extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
+extern "C" __attribute__((weak)) void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd,
+                                                                    uint8_t epnum)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -385,7 +387,8 @@ extern "C" void HAL_PCD_DataOutStageCallback(PCD_HandleTypeDef* hpcd, uint8_t ep
   ep->OnTransferCompleteCallback(true, actual_transfer_size);
 }
 
-extern "C" void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
+extern "C" __attribute__((weak)) void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd,
+                                                                       uint8_t epnum)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
@@ -401,7 +404,8 @@ extern "C" void HAL_PCD_ISOINIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t
   ep->OnTransferCompleteCallback(true, 0);
 }
 
-extern "C" void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd, uint8_t epnum)
+extern "C" __attribute__((weak)) void HAL_PCD_ISOOUTIncompleteCallback(PCD_HandleTypeDef* hpcd,
+                                                                        uint8_t epnum)
 {
   auto id = STM32USBDeviceGetID(hpcd);
 
