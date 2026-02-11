@@ -32,7 +32,13 @@ class MSPM0ADC : public ADC
   float scale_;
   bool use_dma_;
   uint8_t dma_channel_id_;
-  uint16_t dma_sample_;
+  uint32_t dma_trigger_;
+  uint32_t dma_irq_mask_;
+  uint32_t dma_src_addr_;
+  uint32_t dma_mem_trigger_mask_;
+  uint32_t dma_sample_;
+  uint32_t mem_interrupt_mask_;
+  uint32_t seq_start_addr_;
 };
 
 #define MSPM0_ADC_INIT(name)                                                            \

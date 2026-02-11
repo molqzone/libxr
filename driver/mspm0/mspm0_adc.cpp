@@ -1,5 +1,6 @@
 #include "mspm0_adc.hpp"
 
+#include <cstddef>
 #include <cstdint>
 
 #include "dl_dma.h"
@@ -11,6 +12,12 @@ namespace
 
 constexpr uint32_t MSPM0_ADC_DMA_TRIGGER_INVALID = 0xFFFFFFFFU;
 constexpr uint8_t MSPM0_ADC_DMA_CHANNEL_INVALID = 0xFF;
+constexpr uint8_t MSPM0_ADC_DMA_SINGLE_SAMPLE_COUNT = 1U;
+
+constexpr uint32_t get_dma_interrupt_mask(uint8_t channel_id)
+{
+  return (channel_id < 32U) ? (1UL << channel_id) : 0U;
+}
 
 uint32_t get_mem_result_interrupt_mask(DL_ADC12_MEM_IDX mem_idx)
 {
@@ -41,7 +48,42 @@ uint32_t get_mem_result_interrupt_mask(DL_ADC12_MEM_IDX mem_idx)
     case DL_ADC12_MEM_IDX_11:
       return DL_ADC12_INTERRUPT_MEM11_RESULT_LOADED;
     default:
+      ASSERT(false);
       return DL_ADC12_INTERRUPT_MEM0_RESULT_LOADED;
+  }
+}
+
+uint32_t get_seq_start_addr(DL_ADC12_MEM_IDX mem_idx)
+{
+  switch (mem_idx)
+  {
+    case DL_ADC12_MEM_IDX_0:
+      return DL_ADC12_SEQ_START_ADDR_00;
+    case DL_ADC12_MEM_IDX_1:
+      return DL_ADC12_SEQ_START_ADDR_01;
+    case DL_ADC12_MEM_IDX_2:
+      return DL_ADC12_SEQ_START_ADDR_02;
+    case DL_ADC12_MEM_IDX_3:
+      return DL_ADC12_SEQ_START_ADDR_03;
+    case DL_ADC12_MEM_IDX_4:
+      return DL_ADC12_SEQ_START_ADDR_04;
+    case DL_ADC12_MEM_IDX_5:
+      return DL_ADC12_SEQ_START_ADDR_05;
+    case DL_ADC12_MEM_IDX_6:
+      return DL_ADC12_SEQ_START_ADDR_06;
+    case DL_ADC12_MEM_IDX_7:
+      return DL_ADC12_SEQ_START_ADDR_07;
+    case DL_ADC12_MEM_IDX_8:
+      return DL_ADC12_SEQ_START_ADDR_08;
+    case DL_ADC12_MEM_IDX_9:
+      return DL_ADC12_SEQ_START_ADDR_09;
+    case DL_ADC12_MEM_IDX_10:
+      return DL_ADC12_SEQ_START_ADDR_10;
+    case DL_ADC12_MEM_IDX_11:
+      return DL_ADC12_SEQ_START_ADDR_11;
+    default:
+      ASSERT(false);
+      return DL_ADC12_SEQ_START_ADDR_00;
   }
 }
 
@@ -74,11 +116,12 @@ uint32_t get_mem_result_dma_trigger_mask(DL_ADC12_MEM_IDX mem_idx)
     case DL_ADC12_MEM_IDX_11:
       return DL_ADC12_DMA_MEM11_RESULT_LOADED;
     default:
+      ASSERT(false);
       return DL_ADC12_DMA_MEM0_RESULT_LOADED;
   }
 }
 
-uint32_t get_adcdma_trigger(const ADC12_Regs* instance)  // NOLINT
+uint32_t get_adcdma_trigger(const ADC12_Regs* instance)
 {
   const uintptr_t INSTANCE_ADDR = reinterpret_cast<uintptr_t>(instance);
 
@@ -137,14 +180,24 @@ MSPM0ADC::MSPM0ADC(Resources res)
       scale_(0.0f),
       use_dma_(false),
       dma_channel_id_(DMA_CHANNEL_INVALID),
-      dma_sample_(0)
+      dma_trigger_(MSPM0_ADC_DMA_TRIGGER_INVALID),
+      dma_irq_mask_(0U),
+      dma_src_addr_(0U),
+      dma_mem_trigger_mask_(0U),
+      dma_sample_(0U),
+      mem_interrupt_mask_(0U),
+      seq_start_addr_(0U)
 {
   ASSERT(res_.instance != nullptr);
   ASSERT(res_.vref > 0.0f);
+  ASSERT(DL_ADC12_isConversionsEnabled(res_.instance));
+
+  mem_interrupt_mask_ = get_mem_result_interrupt_mask(res_.mem_idx);
+  seq_start_addr_ = get_seq_start_addr(res_.mem_idx);
+  dma_mem_trigger_mask_ = get_mem_result_dma_trigger_mask(res_.mem_idx);
 
   const uint32_t RESOLUTION = DL_ADC12_getResolution(res_.instance);
   float full_scale = 4095.0f;
-
   if (RESOLUTION == DL_ADC12_SAMP_CONV_RES_12_BIT)
   {
     full_scale = 4095.0f;
@@ -157,34 +210,66 @@ MSPM0ADC::MSPM0ADC(Resources res)
   {
     full_scale = 255.0f;
   }
-
   scale_ = res_.vref / full_scale;
 
+  DL_ADC12_stopConversion(res_.instance);
+  DL_Common_updateReg(&res_.instance->ULLMEM.CTL1,
+                      (DL_ADC12_SAMPLING_SOURCE_AUTO | DL_ADC12_TRIG_SRC_SOFTWARE),
+                      (ADC12_CTL1_SAMPMODE_MASK | ADC12_CTL1_TRIGSRC_MASK));
+
+  ASSERT(DL_ADC12_getSamplingSource(res_.instance) == DL_ADC12_SAMPLING_SOURCE_AUTO);
+  ASSERT(DL_ADC12_getTriggerSource(res_.instance) == DL_ADC12_TRIG_SRC_SOFTWARE);
+
+  DL_ADC12_setStartAddress(res_.instance, seq_start_addr_);
+  DL_ADC12_enableInterrupt(res_.instance, mem_interrupt_mask_);
+  DL_ADC12_clearInterruptStatus(res_.instance, mem_interrupt_mask_);
+  DL_ADC12_enableConversions(res_.instance);
+
   use_dma_ = DL_ADC12_isDMAEnabled(res_.instance);
-  if (use_dma_)
+  if (!use_dma_)
   {
-#if !defined(DMA_BASE)
-    ASSERT(false);
-#else
-    const uint32_t DMA_MASK = get_mem_result_dma_trigger_mask(res_.mem_idx);
-    if (DL_ADC12_getEnabledDMATrigger(res_.instance, DMA_MASK) == 0U)
-    {
-      ASSERT(false);
-    }
-
-    const uint32_t DMA_TRIGGER = get_adcdma_trigger(res_.instance);
-    if (DMA_TRIGGER == MSPM0_ADC_DMA_TRIGGER_INVALID)
-    {
-      ASSERT(false);
-    }
-
-    dma_channel_id_ = resolve_dma_channel_id(DMA_TRIGGER);
-    if (dma_channel_id_ == DMA_CHANNEL_INVALID)
-    {
-      ASSERT(false);
-    }
-#endif
+    return;
   }
+
+#if !defined(DMA_BASE)
+  ASSERT(false);
+#else
+  ASSERT(DL_ADC12_getEnabledDMATrigger(res_.instance, dma_mem_trigger_mask_) != 0U);
+  ASSERT(DL_ADC12_getDMASampleCnt(res_.instance) == MSPM0_ADC_DMA_SINGLE_SAMPLE_COUNT);
+
+  dma_trigger_ = get_adcdma_trigger(res_.instance);
+  ASSERT(dma_trigger_ != MSPM0_ADC_DMA_TRIGGER_INVALID);
+
+  dma_channel_id_ = resolve_dma_channel_id(dma_trigger_);
+  ASSERT(dma_channel_id_ != DMA_CHANNEL_INVALID);
+
+  dma_irq_mask_ = get_dma_interrupt_mask(dma_channel_id_);
+  ASSERT(dma_irq_mask_ != 0U);
+
+  ASSERT(DL_DMA_getTriggerType(DMA, dma_channel_id_) == DL_DMA_TRIGGER_TYPE_EXTERNAL);
+  ASSERT(DL_DMA_getTrigger(DMA, dma_channel_id_) == dma_trigger_);
+  ASSERT(DL_DMA_getTransferMode(DMA, dma_channel_id_) == DL_DMA_SINGLE_TRANSFER_MODE);
+  ASSERT(DL_DMA_getExtendedMode(DMA, dma_channel_id_) == DL_DMA_NORMAL_MODE);
+  ASSERT(DL_DMA_getSrcIncrement(DMA, dma_channel_id_) == DL_DMA_ADDR_UNCHANGED);
+  ASSERT(DL_DMA_getDestIncrement(DMA, dma_channel_id_) == DL_DMA_ADDR_INCREMENT);
+  ASSERT(DL_DMA_getSrcWidth(DMA, dma_channel_id_) == DL_DMA_WIDTH_WORD);
+  ASSERT(DL_DMA_getDestWidth(DMA, dma_channel_id_) == DL_DMA_WIDTH_WORD);
+
+  DL_DMA_setTrigger(DMA, dma_channel_id_, static_cast<uint8_t>(dma_trigger_),
+                    DL_DMA_TRIGGER_TYPE_EXTERNAL);
+
+  const uintptr_t MEMRES_ADDR = reinterpret_cast<uintptr_t>(
+      &res_.instance->ULLMEM.MEMRES[static_cast<size_t>(res_.mem_idx)]);
+  dma_src_addr_ = static_cast<uint32_t>(MEMRES_ADDR);
+
+  DL_DMA_setSrcAddr(DMA, dma_channel_id_, dma_src_addr_);
+  ASSERT(DL_DMA_getSrcAddr(DMA, dma_channel_id_) == dma_src_addr_);
+
+  DL_DMA_setDestAddr(DMA, dma_channel_id_, reinterpret_cast<uint32_t>(&dma_sample_));
+  DL_DMA_setTransferSize(DMA, dma_channel_id_, 1U);
+  DL_DMA_clearInterruptStatus(DMA, dma_irq_mask_);
+  DL_ADC12_clearDMATriggerStatus(res_.instance, dma_mem_trigger_mask_);
+#endif
 }
 
 float MSPM0ADC::Read()
@@ -193,47 +278,44 @@ float MSPM0ADC::Read()
   {
     return ReadByDMA();
   }
-
   return ReadByPolling();
 }
 
 float MSPM0ADC::ReadByPolling()
 {
-  const uint32_t MEM_INTERRUPT = get_mem_result_interrupt_mask(res_.mem_idx);
-
-  DL_ADC12_clearInterruptStatus(res_.instance, MEM_INTERRUPT);
+  DL_ADC12_disableDMA(res_.instance);
+  DL_ADC12_enableConversions(res_.instance);
+  DL_ADC12_clearInterruptStatus(res_.instance, mem_interrupt_mask_);
   DL_ADC12_startConversion(res_.instance);
-
-  while (DL_ADC12_getRawInterruptStatus(res_.instance, MEM_INTERRUPT) == 0U)
+  while (DL_ADC12_getRawInterruptStatus(res_.instance, mem_interrupt_mask_) == 0U)
   {
   }
-
-  const uint16_t RAW = DL_ADC12_getMemResult(res_.instance, res_.mem_idx);
-  DL_ADC12_clearInterruptStatus(res_.instance, MEM_INTERRUPT);
-  return static_cast<float>(RAW) * scale_;
+  const uint16_t raw = DL_ADC12_getMemResult(res_.instance, res_.mem_idx);
+  DL_ADC12_clearInterruptStatus(res_.instance, mem_interrupt_mask_);
+  return static_cast<float>(raw) * scale_;
 }
 
 float MSPM0ADC::ReadByDMA()
 {
+  DL_ADC12_enableConversions(res_.instance);
+  DL_ADC12_clearInterruptStatus(res_.instance, DL_ADC12_INTERRUPT_DMA_DONE);
+  DL_ADC12_clearDMATriggerStatus(res_.instance, dma_mem_trigger_mask_);
+
+  DL_ADC12_setDMASamplesCnt(res_.instance, MSPM0_ADC_DMA_SINGLE_SAMPLE_COUNT);
+  DL_ADC12_enableDMA(res_.instance);
+
   DL_DMA_disableChannel(DMA, dma_channel_id_);
-  DL_DMA_setSrcAddr(
-      DMA, dma_channel_id_,
-      static_cast<uint32_t>(DL_ADC12_getMemResultAddress(res_.instance, res_.mem_idx)));
-  DL_DMA_setDestAddr(DMA, dma_channel_id_,
-                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&dma_sample_)));
-  DL_DMA_setTransferSize(DMA, dma_channel_id_, 1);
+  DL_DMA_setDestAddr(DMA, dma_channel_id_, reinterpret_cast<uint32_t>(&dma_sample_));
+  DL_DMA_setTransferSize(DMA, dma_channel_id_, 1U);
+  DL_DMA_clearInterruptStatus(DMA, dma_irq_mask_);
   DL_DMA_enableChannel(DMA, dma_channel_id_);
 
-  DL_ADC12_enableDMA(res_.instance);
-  DL_ADC12_clearInterruptStatus(res_.instance, DL_ADC12_INTERRUPT_DMA_DONE);
   DL_ADC12_startConversion(res_.instance);
 
-  while (DL_ADC12_getRawInterruptStatus(res_.instance, DL_ADC12_INTERRUPT_DMA_DONE) ==
-         0U)
+  while (DL_ADC12_getRawInterruptStatus(res_.instance, DL_ADC12_INTERRUPT_DMA_DONE) == 0U)
   {
   }
 
-  DL_ADC12_clearInterruptStatus(res_.instance, DL_ADC12_INTERRUPT_DMA_DONE);
-  DL_DMA_disableChannel(DMA, dma_channel_id_);
-  return static_cast<float>(dma_sample_) * scale_;
+  const uint16_t raw = static_cast<uint16_t>(dma_sample_ & 0xFFFFU);
+  return static_cast<float>(raw) * scale_;
 }
