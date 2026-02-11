@@ -1,5 +1,7 @@
 #include "mspm0_adc.hpp"
 
+#include <cstdint>
+
 #include "dl_dma.h"
 
 using namespace LibXR;
@@ -78,15 +80,17 @@ uint32_t get_mem_result_dma_trigger_mask(DL_ADC12_MEM_IDX mem_idx)
 
 uint32_t get_adcdma_trigger(const ADC12_Regs* instance)  // NOLINT
 {
+  const uintptr_t INSTANCE_ADDR = reinterpret_cast<uintptr_t>(instance);
+
 #if defined(ADC0_BASE) && defined(DMA_ADC0_EVT_GEN_BD_TRIG)
-  if (instance == reinterpret_cast<const ADC12_Regs*>(ADC0_BASE))
+  if (INSTANCE_ADDR == static_cast<uintptr_t>(ADC0_BASE))
   {
     return DMA_ADC0_EVT_GEN_BD_TRIG;
   }
 #endif
 
 #if defined(ADC1_BASE) && defined(DMA_ADC1_EVT_GEN_BD_TRIG)
-  if (instance == reinterpret_cast<const ADC12_Regs*>(ADC1_BASE))
+  if (INSTANCE_ADDR == static_cast<uintptr_t>(ADC1_BASE))
   {
     return DMA_ADC1_EVT_GEN_BD_TRIG;
   }
