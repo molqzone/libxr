@@ -243,10 +243,8 @@ class CDCBase : public DeviceClass
     ASSERT(ans == ErrorCode::OK);
 
     // 配置端点参数
-    ep_data_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::BULK, UINT16_MAX, true});
-    ep_data_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::BULK, UINT16_MAX, true});
+    ep_data_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, 64, false});
+    ep_data_out_->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK, 64, false});
     ep_comm_in_->Configure({Endpoint::Direction::IN, Endpoint::Type::INTERRUPT, 16});
 
     // === 填充CDC描述符块 ===

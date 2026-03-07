@@ -17,9 +17,9 @@ static inline volatile uint8_t* get_rx_ctrl_addr(USB::Endpoint::EPNumber ep)
 {
   return &USBFSD->UEP0_RX_CTRL + 4 * (USB::Endpoint::EPNumberToInt8(ep));
 }
-static inline volatile uint16_t* get_tx_len_addr(USB::Endpoint::EPNumber ep)
+static inline volatile uint8_t* get_tx_len_addr(USB::Endpoint::EPNumber ep)
 {
-  return &USBFSD->UEP0_TX_LEN + 2 * (USB::Endpoint::EPNumberToInt8(ep));
+  return &USBFSD->UEP0_TX_LEN + 4 * (USB::Endpoint::EPNumberToInt8(ep));
 }
 static inline volatile uint32_t* get_dma_addr(USB::Endpoint::EPNumber ep)
 {
@@ -31,33 +31,77 @@ static void set_dma_buffer(USB::Endpoint::EPNumber ep_num, void* value,
 {
   *get_dma_addr(ep_num) = (uint32_t)value;
 
-  if (!double_buffer)
-  {
-    return;
-  }
-
   switch (ep_num)
   {
     case USB::Endpoint::EPNumber::EP1:
-      USBFSD->UEP4_1_MOD |= USBFS_UEP1_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP4_1_MOD |= USBFS_UEP1_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP4_1_MOD &= ~USBFS_UEP1_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP2:
-      USBFSD->UEP2_3_MOD |= USBFS_UEP2_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP2_3_MOD |= USBFS_UEP2_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP2_3_MOD &= ~USBFS_UEP2_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP3:
-      USBFSD->UEP2_3_MOD |= USBFS_UEP3_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP2_3_MOD |= USBFS_UEP3_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP2_3_MOD &= ~USBFS_UEP3_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP4:
-      USBFSD->UEP4_1_MOD |= USBFS_UEP4_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP4_1_MOD |= USBFS_UEP4_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP4_1_MOD &= ~USBFS_UEP4_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP5:
-      USBFSD->UEP5_6_MOD |= USBFS_UEP5_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP5_6_MOD |= USBFS_UEP5_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP5_6_MOD &= ~USBFS_UEP5_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP6:
-      USBFSD->UEP5_6_MOD |= USBFS_UEP6_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP5_6_MOD |= USBFS_UEP6_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP5_6_MOD &= ~USBFS_UEP6_BUF_MOD;
+      }
       break;
     case USB::Endpoint::EPNumber::EP7:
-      USBFSD->UEP7_MOD |= USBFS_UEP7_BUF_MOD;
+      if (double_buffer)
+      {
+        USBFSD->UEP7_MOD |= USBFS_UEP7_BUF_MOD;
+      }
+      else
+      {
+        USBFSD->UEP7_MOD &= ~USBFS_UEP7_BUF_MOD;
+      }
       break;
     default:
       break;
@@ -66,7 +110,7 @@ static void set_dma_buffer(USB::Endpoint::EPNumber ep_num, void* value,
 
 static void set_tx_len(USB::Endpoint::EPNumber ep_num, uint32_t value)
 {
-  *get_tx_len_addr(ep_num) = value;
+  *get_tx_len_addr(ep_num) = static_cast<uint8_t>(value);
 }
 
 static void enable_tx(USB::Endpoint::EPNumber ep_num)
@@ -217,7 +261,7 @@ CH32EndpointOtgFs::CH32EndpointOtgFs(EPNumber ep_num, Direction dir,
 {
   map_otg_fs_[EPNumberToInt8(GetNumber())][static_cast<uint8_t>(dir)] = this;
 
-  set_dma_buffer(GetNumber(), dma_buffer_.addr_, is_isochronous ? false : true);
+  set_dma_buffer(GetNumber(), dma_buffer_.addr_, false);
 
   if (dir == Direction::IN)
   {
@@ -237,14 +281,22 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
 
   if (GetNumber() != EPNumber::EP0 && !is_isochronous_)
   {
-    ep_cfg.double_buffer = true;
+    ep_cfg.double_buffer = cfg.double_buffer;
   }
   else
   {
     ep_cfg.double_buffer = false;
   }
 
-  ep_cfg.max_packet_size = GetBuffer().size_;
+  if (cfg.max_packet_size == UINT16_MAX)
+  {
+    ep_cfg.max_packet_size = GetBuffer().size_;
+  }
+  else
+  {
+    ASSERT(cfg.max_packet_size <= GetBuffer().size_);
+    ep_cfg.max_packet_size = cfg.max_packet_size;
+  }
 
   set_tx_len(GetNumber(), 0);
 
@@ -257,8 +309,17 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
   }
   else
   {
-    *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK;
-    *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK;
+    if (cfg.type == Type::ISOCHRONOUS)
+    {
+      *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK;
+      *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK;
+    }
+    else
+    {
+      *get_rx_ctrl_addr(GetNumber()) = USBFS_UEP_R_RES_NAK | USBFS_UEP_R_AUTO_TOG;
+      *get_tx_ctrl_addr(GetNumber()) = USBFS_UEP_T_RES_NAK | USBFS_UEP_T_AUTO_TOG;
+    }
+
     if (GetDirection() == Direction::IN)
     {
       enable_tx(GetNumber());
@@ -269,7 +330,7 @@ void CH32EndpointOtgFs::Configure(const Config& cfg)
     }
   }
 
-  set_dma_buffer(GetNumber(), dma_buffer_.addr_, is_isochronous_ ? false : true);
+  set_dma_buffer(GetNumber(), dma_buffer_.addr_, ep_cfg.double_buffer);
 
   SetState(State::IDLE);
 }
@@ -312,7 +373,8 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
 
     if (GetNumber() != EPNumber::EP0)
     {
-      *addr = (is_isochronous_ ? USBFS_UEP_T_RES_NONE : USBFS_UEP_T_RES_ACK) |
+      *addr = ((GetType() == Type::ISOCHRONOUS) ? USBFS_UEP_T_RES_NONE
+                                                 : USBFS_UEP_T_RES_ACK) |
               (*addr & (~USBFS_UEP_T_RES_MASK));
     }
     else
@@ -326,7 +388,8 @@ ErrorCode CH32EndpointOtgFs::Transfer(size_t size)
 
     if (GetNumber() != EPNumber::EP0)
     {
-      *addr = (is_isochronous_ ? USBFS_UEP_R_RES_NONE : USBFS_UEP_R_RES_ACK) |
+      *addr = ((GetType() == Type::ISOCHRONOUS) ? USBFS_UEP_R_RES_NONE
+                                                 : USBFS_UEP_R_RES_ACK) |
               (*addr & (~USBFS_UEP_R_RES_MASK));
     }
     else
