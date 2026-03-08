@@ -2,8 +2,7 @@
 #include <atomic>
 #include <cstdint>
 
-#include "libxr_def.hpp"
-#include DEF2STR(LIBXR_CH32_CONFIG_FILE)
+#include "ch32_usb.hpp"
 
 namespace LibXR::CH32UsbCanShared
 {
@@ -20,7 +19,7 @@ static constexpr uint16_t USBD_PMA_BYTES_WITHCAN = 384;
 
 // USB/CAN 共享中断拓扑的编译期能力标志。
 // Build-time capability flags for USB/CAN shared interrupt topology.
-#if defined(RCC_APB1Periph_USB)
+#if defined(LIBXR_CH32_HAS_USB_DEV_FS)
 inline constexpr bool K_HAS_USB_DEV_FS = true;
 #else
 inline constexpr bool K_HAS_USB_DEV_FS = false;

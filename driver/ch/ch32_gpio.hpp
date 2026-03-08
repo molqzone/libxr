@@ -8,6 +8,19 @@
 namespace LibXR
 {
 
+static inline GPIOSpeed_TypeDef ch32_gpio_speed_fast()
+{
+  return GPIO_Speed_50MHz;
+}
+
+static inline GPIOMode_TypeDef ch32_gpio_mode_out_od()
+{
+#if defined(GPIO_Mode_Out_OD)
+  return GPIO_Mode_Out_OD;
+#else
+  return GPIO_Mode_Out_PP;
+#endif
+}
 typedef enum
 {
 #if defined(GPIOA)
@@ -77,7 +90,7 @@ class CH32GPIO final : public GPIO
   {
     GPIO_InitTypeDef gpio_init = {};
     gpio_init.GPIO_Pin = pin_;
-    gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
+    gpio_init.GPIO_Speed = ch32_gpio_speed_fast();
 
     switch (config.direction)
     {
@@ -95,7 +108,7 @@ class CH32GPIO final : public GPIO
         break;
 
       case Direction::OUTPUT_OPEN_DRAIN:
-        gpio_init.GPIO_Mode = GPIO_Mode_Out_OD;
+        gpio_init.GPIO_Mode = ch32_gpio_mode_out_od();
         break;
     }
 

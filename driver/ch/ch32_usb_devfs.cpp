@@ -8,11 +8,15 @@
 using namespace LibXR;
 using namespace LibXR::USB;
 
-#if defined(RCC_APB1Periph_USB)
+#if defined(LIBXR_CH32_HAS_USB_DEV_FS)
 
 namespace
 {
 
+static inline void ch32_clock_ahb_enable(uint32_t periph)
+{
+  RCC_AHBPeriphClockCmd(periph, ENABLE);
+}
 static void ch32_usb_clock48m_config()
 {
   RCC_ClocksTypeDef clk{};
@@ -417,8 +421,21 @@ static void usbdev_fs_irqhandler()
 
 static void usb_irq_thunk() { usbdev_fs_irqhandler(); }
 
+#if defined(__CH32X035_H)
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" __attribute__((interrupt)) void USBFS_IRQHandler(void)
+{
+  usb_irq_thunk();
+}
+#endif
+
+#if defined(__CH32X035_H)
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" __attribute__((interrupt)) void USBFSWakeUp_IRQHandler(void)
+#else
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" __attribute__((interrupt)) void USBWakeUp_IRQHandler(void)
+#endif
 {
 #if defined(EXTI_Line18)
   EXTI_ClearITPendingBit(EXTI_Line18);
@@ -506,7 +523,11 @@ void CH32USBDeviceFS::Start(bool)
   LibXR::CH32UsbCanShared::register_usb_irq(&usb_irq_thunk);
 
   ch32_usb_clock48m_config();
+#if defined(RCC_AHBPeriph_USBFS)
+  ch32_clock_ahb_enable(RCC_AHBPeriph_USBFS);
+#elif defined(RCC_APB1Periph_USB)
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_USB, ENABLE);
+#endif
 
 #if defined(RCC_APB2Periph_GPIOA) && defined(GPIOA) && defined(GPIO_Pin_11) &&        \
     defined(GPIO_Pin_12) && defined(GPIO_Mode_Out_PP) && defined(GPIO_Speed_50MHz) && \
@@ -537,9 +558,18 @@ void CH32USBDeviceFS::Start(bool)
   EXTEN->EXTEN_CTR &= ~EXTEN_USBD_LS;
 #endif
 
+#if defined(__CH32X035_H)
+  NVIC_EnableIRQ(USBFS_IRQn);
+#else
   NVIC_EnableIRQ(USB_LP_CAN1_RX0_IRQn);
   NVIC_EnableIRQ(USB_HP_CAN1_TX_IRQn);
+#endif
+
+#if defined(__CH32X035_H)
+  NVIC_EnableIRQ(USBFSWakeUp_IRQn);
+#else
   NVIC_EnableIRQ(USBWakeUp_IRQn);
+#endif
 
 #if defined(EXTEN_USBD_PU_EN)
   EXTEN->EXTEN_CTR |= EXTEN_USBD_PU_EN;
@@ -581,14 +611,23 @@ void CH32USBDeviceFS::Stop(bool)
 
   if (!LibXR::CH32UsbCanShared::can1_active())
   {
+#if defined(__CH32X035_H)
+    NVIC_DisableIRQ(USBFS_IRQn);
+#else
     NVIC_DisableIRQ(USB_LP_CAN1_RX0_IRQn);
     NVIC_DisableIRQ(USB_HP_CAN1_TX_IRQn);
+#endif
   }
+
+#if defined(__CH32X035_H)
+  NVIC_DisableIRQ(USBFSWakeUp_IRQn);
+#else
   NVIC_DisableIRQ(USBWakeUp_IRQn);
+#endif
 
   *usbdev_cntr() = USB_CNTR_FRES;
 }
 
-#endif  // defined(RCC_APB1Periph_USB)
+#endif  // defined(LIBXR_CH32_HAS_USB_DEV_FS)
 
 // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

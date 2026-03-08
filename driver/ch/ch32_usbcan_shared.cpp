@@ -1,6 +1,6 @@
 #include "ch32_usbcan_shared.hpp"
 
-#if defined(RCC_APB1Periph_USB) && defined(CAN1) && !defined(CAN2)
+#if defined(LIBXR_CH32_HAS_USB_DEV_FS) && defined(CAN1) && !defined(CAN2)
 
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" __attribute__((interrupt)) void USB_LP_CAN1_RX0_IRQHandler(void)

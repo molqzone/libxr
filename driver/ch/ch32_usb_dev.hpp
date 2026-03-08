@@ -37,7 +37,7 @@ class CH32USBDevice : public USB::EndpointPool, public USB::DeviceCore
   uint8_t id_;
 };
 
-#if defined(RCC_APB1Periph_USB)
+#if defined(LIBXR_CH32_HAS_USB_DEV_FS)
 
 /**
  * @brief CH32 FSDEV 设备驱动 / CH32 FSDEV device driver
@@ -78,7 +78,7 @@ class CH32USBDeviceFS : public USB::EndpointPool, public USB::DeviceCore
   static inline CH32USBDeviceFS* self_ = nullptr;
 };
 
-#endif  // defined(RCC_APB1Periph_USB)
+#endif  // defined(LIBXR_CH32_HAS_USB_DEV_FS)
 
 #if defined(USBFSD)
 

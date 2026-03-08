@@ -6,7 +6,7 @@
 #include "ch32_usb.hpp"
 
 // Register helpers for the classic FSDEV/PMA peripheral path.
-#if defined(RCC_APB1Periph_USB)
+#if defined(LIBXR_CH32_HAS_USB_DEV_FS)
 
 namespace LibXR::CH32::FSDEV
 {
@@ -180,6 +180,6 @@ static inline void set_ep_address(uint8_t ep, uint8_t addr)
 
 }  // namespace LibXR::CH32::FSDEV
 
-#endif  // defined(RCC_APB1Periph_USB)
+#endif  // defined(LIBXR_CH32_HAS_USB_DEV_FS)
 
 // NOLINTEND(cppcoreguidelines-pro-type-cstyle-cast,performance-no-int-to-ptr)

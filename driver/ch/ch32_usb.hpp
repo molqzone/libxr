@@ -3,6 +3,11 @@
 #include "libxr_def.hpp"
 #include DEF2STR(LIBXR_CH32_CONFIG_FILE)
 
+#if !defined(LIBXR_CH32_HAS_USB_DEV_FS) && \
+    (defined(RCC_APB1Periph_USB) || defined(RCC_AHBPeriph_USBFS))
+#define LIBXR_CH32_HAS_USB_DEV_FS 1
+#endif
+
 namespace LibXR
 {
 

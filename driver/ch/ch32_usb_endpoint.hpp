@@ -41,7 +41,7 @@ class CH32EndpointOtgFs : public USB::Endpoint
 
 #endif  // defined(USBFSD)
 
-#if defined(RCC_APB1Periph_USB)
+#if defined(LIBXR_CH32_HAS_USB_DEV_FS)
 
 /**
  * @brief CH32 FSDEV 端点实现 / CH32 FSDEV endpoint implementation
@@ -82,7 +82,7 @@ class CH32EndpointDevFs : public USB::Endpoint
   static inline CH32EndpointDevFs* map_dev_fs_[EP_DEV_FS_MAX_SIZE][2] = {};
 };
 
-#endif  // defined(RCC_APB1Periph_USB)
+#endif  // defined(LIBXR_CH32_HAS_USB_DEV_FS)
 
 #if defined(USBHSD)
 
