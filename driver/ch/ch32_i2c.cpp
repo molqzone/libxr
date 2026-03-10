@@ -9,6 +9,18 @@
 
 using namespace LibXR;
 
+namespace
+{
+static inline GPIOMode_TypeDef ch32_i2c_gpio_mode_af_od()
+{
+#if defined(GPIO_Mode_AF_OD)
+  return GPIO_Mode_AF_OD;
+#else
+  return GPIO_Mode_AF_PP;
+#endif
+}
+}  // namespace
+
 CH32I2C* CH32I2C::map_[CH32_I2C_NUMBER] = {nullptr};
 
 static inline void ch32_i2c_enable_clocks(ch32_i2c_id_t id)
@@ -46,7 +58,7 @@ CH32I2C::CH32I2C(ch32_i2c_id_t id, RawData dma_buff, GPIO_TypeDef* scl_port,
   {
     GPIO_InitTypeDef gpio = {};
     gpio.GPIO_Speed = GPIO_Speed_50MHz;
-    gpio.GPIO_Mode = GPIO_Mode_AF_OD;
+    gpio.GPIO_Mode = ch32_i2c_gpio_mode_af_od();
 
     RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(scl_port_), ENABLE);
     RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(sda_port_), ENABLE);
@@ -825,8 +837,21 @@ void CH32I2C::ErrorIRQHandler()
 {
   bool has_err = false;
 
-  const uint32_t ITS[] = {I2C_IT_BERR,    I2C_IT_ARLO,   I2C_IT_AF,      I2C_IT_OVR,
-                          I2C_IT_TIMEOUT, I2C_IT_PECERR, I2C_IT_SMBALERT};
+  const uint32_t ITS[] = {
+      I2C_IT_BERR,
+      I2C_IT_ARLO,
+      I2C_IT_AF,
+      I2C_IT_OVR,
+#if defined(I2C_IT_TIMEOUT)
+      I2C_IT_TIMEOUT,
+#endif
+#if defined(I2C_IT_PECERR)
+      I2C_IT_PECERR,
+#endif
+#if defined(I2C_IT_SMBALERT)
+      I2C_IT_SMBALERT,
+#endif
+  };
 
   for (uint32_t it : ITS)
   {
