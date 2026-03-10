@@ -845,9 +845,7 @@ void CH32I2C::ErrorIRQHandler()
 #if defined(I2C_IT_TIMEOUT)
       I2C_IT_TIMEOUT,
 #endif
-#if defined(I2C_IT_PECERR)
       I2C_IT_PECERR,
-#endif
 #if defined(I2C_IT_SMBALERT)
       I2C_IT_SMBALERT,
 #endif
