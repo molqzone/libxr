@@ -20,8 +20,8 @@ if("${LIBXR_CH32_CONFIG_FILE}" STREQUAL "ch32x035_conf.h")
         "${CMAKE_CURRENT_LIST_DIR}/ch32_uart.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/ch32_uart_def.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/ch32_usbcan_shared.cpp"
-        "${CMAKE_CURRENT_LIST_DIR}/ch32_usb_endpoint_devfs.cpp"
-        "${CMAKE_CURRENT_LIST_DIR}/ch32_usb_devfs.cpp")
+        "${CMAKE_CURRENT_LIST_DIR}/ch32_usb_endpoint_otgfs.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/ch32_usb_otgfs.cpp")
 endif()
 
 target_sources(${PROJECT_NAME}
