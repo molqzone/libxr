@@ -12,6 +12,15 @@ using namespace LibXR::USB;
 namespace
 {
 
+static inline void ch32_clock_ahb_enable(uint32_t periph)
+{
+#if defined(__CH32H417_H)
+  RCC_HBPeriphClockCmd(periph, ENABLE);
+#else
+  RCC_AHBPeriphClockCmd(periph, ENABLE);
+#endif
+}
+
 static void ch32_usb_clock48m_config()
 {
   RCC_ClocksTypeDef clk{};
@@ -85,10 +94,14 @@ static void ch32_usbhs_rcc_enable()
 #endif
 
 #if defined(RCC_AHBPeriph_USBHS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBHS, ENABLE);
+  ch32_clock_ahb_enable(RCC_AHBPeriph_USBHS);
+#elif defined(RCC_HBPeriph_USBHS)
+  ch32_clock_ahb_enable(RCC_HBPeriph_USBHS);
 #endif
 #if defined(RCC_AHBPeriph_USBFS)
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_USBFS, ENABLE);
+  ch32_clock_ahb_enable(RCC_AHBPeriph_USBFS);
+#elif defined(RCC_HBPeriph_OTG_FS)
+  ch32_clock_ahb_enable(RCC_HBPeriph_OTG_FS);
 #endif
 }
 

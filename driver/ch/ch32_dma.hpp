@@ -136,6 +136,10 @@ ch32_dma_channel_t ch32_dma_get_id(DMA_Channel_TypeDef* channel);
 
 DMA_Channel_TypeDef* ch32_dma_get_channel(ch32_dma_channel_t id);
 
+DMA_TypeDef* ch32_dma_get_controller(DMA_Channel_TypeDef* channel);
+ITStatus ch32_dma_get_it_status(DMA_Channel_TypeDef* channel, uint32_t dma_it);
+void ch32_dma_clear_it_pending(DMA_Channel_TypeDef* channel, uint32_t dma_it);
+
 /**
  * @brief 注册 DMA 回调 / Register DMA callback
  */

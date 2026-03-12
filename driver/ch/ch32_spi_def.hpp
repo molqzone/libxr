@@ -21,6 +21,12 @@ typedef enum
   CH32_SPI_ID_ERROR
 } ch32_spi_id_t;
 
+#if defined(__CH32H417_H)
+static constexpr uint16_t CH32_SPI_DEFAULT_PRESCALER = SPI_BaudRatePrescaler_Mode5;
+#else
+static constexpr uint16_t CH32_SPI_DEFAULT_PRESCALER = SPI_BaudRatePrescaler_64;
+#endif
+
 static constexpr uint8_t CH32_SPI_APB_MAP[] = {
 #if defined(SPI1)
     2,
@@ -35,25 +41,49 @@ static constexpr uint8_t CH32_SPI_APB_MAP[] = {
 
 static constexpr uint32_t CH32_SPI_RCC_PERIPH_MAP[] = {
 #if defined(SPI1)
+#if defined(RCC_HB2Periph_SPI1)
+    RCC_HB2Periph_SPI1,
+#else
     RCC_APB2Periph_SPI1,
 #endif
+#endif
 #if defined(SPI2)
+#if defined(RCC_HB1Periph_SPI2)
+    RCC_HB1Periph_SPI2,
+#else
     RCC_APB1Periph_SPI2,
 #endif
+#endif
 #if defined(SPI3)
+#if defined(RCC_HB1Periph_SPI3)
+    RCC_HB1Periph_SPI3,
+#else
     RCC_APB1Periph_SPI3,
+#endif
 #endif
 };
 
 static constexpr uint32_t CH32_SPI_RCC_PERIPH_MAP_DMA[] = {
 #if defined(SPI1)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
+#endif
 #endif
 #if defined(SPI2)
+#if defined(RCC_HBPeriph_DMA1)
+    RCC_HBPeriph_DMA1,
+#else
     RCC_AHBPeriph_DMA1,
 #endif
+#endif
 #if defined(SPI3)
+#if defined(RCC_HBPeriph_DMA2)
+    RCC_HBPeriph_DMA2,
+#else
     RCC_AHBPeriph_DMA2,
+#endif
 #endif
 };
 

@@ -3,6 +3,70 @@
 
 using namespace LibXR;
 
+namespace
+{
+static inline void ch32_clock_bus2_enable(uint32_t periph)
+{
+#if defined(__CH32H417_H)
+  RCC_HB2PeriphClockCmd(periph, ENABLE);
+#else
+  RCC_APB2PeriphClockCmd(periph, ENABLE);
+#endif
+}
+
+static inline void ch32_enable_afio_clock()
+{
+#if defined(__CH32H417_H)
+  RCC_HB2PeriphClockCmd(RCC_HB2Periph_AFIO, ENABLE);
+#else
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+#endif
+}
+
+static inline void ch32_exti_dispatch_0_7()
+{
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line0);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line1);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line2);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line3);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line4);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line5);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line6);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line7);
+}
+
+static inline void ch32_exti_dispatch_8_15()
+{
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line8);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line9);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line10);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line11);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line12);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line13);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line14);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line15);
+}
+
+static inline void ch32_exti_dispatch_5_9()
+{
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line5);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line6);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line7);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line8);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line9);
+}
+
+static inline void ch32_exti_dispatch_10_15()
+{
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line10);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line11);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line12);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line13);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line14);
+  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line15);
+}
+}  // namespace
+
 uint32_t LibXR::ch32_get_gpio_periph(GPIO_TypeDef* port)
 {
   if (false)
@@ -11,31 +75,51 @@ uint32_t LibXR::ch32_get_gpio_periph(GPIO_TypeDef* port)
 #if defined(GPIOA)
   else if (port == GPIOA)
   {
+#if defined(RCC_HB2Periph_GPIOA)
+    return RCC_HB2Periph_GPIOA;
+#else
     return RCC_APB2Periph_GPIOA;
+#endif
 #endif
 #if defined(GPIOB)
   }
   else if (port == GPIOB)
   {
+#if defined(RCC_HB2Periph_GPIOB)
+    return RCC_HB2Periph_GPIOB;
+#else
     return RCC_APB2Periph_GPIOB;
+#endif
 #endif
 #if defined(GPIOC)
   }
   else if (port == GPIOC)
   {
+#if defined(RCC_HB2Periph_GPIOC)
+    return RCC_HB2Periph_GPIOC;
+#else
     return RCC_APB2Periph_GPIOC;
+#endif
 #endif
 #if defined(GPIOD)
   }
   else if (port == GPIOD)
   {
+#if defined(RCC_HB2Periph_GPIOD)
+    return RCC_HB2Periph_GPIOD;
+#else
     return RCC_APB2Periph_GPIOD;
+#endif
 #endif
 #if defined(GPIOE)
   }
   else if (port == GPIOE)
   {
+#if defined(RCC_HB2Periph_GPIOE)
+    return RCC_HB2Periph_GPIOE;
+#else
     return RCC_APB2Periph_GPIOE;
+#endif
   }
 #endif
   return 0;
@@ -69,27 +153,26 @@ extern "C" void EXTI4_IRQHandler(void) { LibXR::CH32GPIO::CheckInterrupt(EXTI_Li
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI9_5_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI9_5_IRQHandler(void)
-{
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line5);
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line6);
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line7);
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line8);
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line9);
-}
+extern "C" void EXTI9_5_IRQHandler(void) { ch32_exti_dispatch_5_9(); }
 
 // NOLINTNEXTLINE(readability-identifier-naming)
 extern "C" void EXTI15_10_IRQHandler(void) __attribute__((interrupt));
 // NOLINTNEXTLINE(readability-identifier-naming)
-extern "C" void EXTI15_10_IRQHandler(void)
-{
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line10);
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line11);
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line12);
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line13);
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line14);
-  LibXR::CH32GPIO::CheckInterrupt(EXTI_Line15);
-}
+extern "C" void EXTI15_10_IRQHandler(void) { ch32_exti_dispatch_10_15(); }
+
+#if defined(EXTI7_0_IRQn)
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void EXTI7_0_IRQHandler(void) __attribute__((interrupt));
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void EXTI7_0_IRQHandler(void) { ch32_exti_dispatch_0_7(); }
+#endif
+
+#if defined(EXTI15_8_IRQn)
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void EXTI15_8_IRQHandler(void) __attribute__((interrupt));
+// NOLINTNEXTLINE(readability-identifier-naming)
+extern "C" void EXTI15_8_IRQHandler(void) { ch32_exti_dispatch_8_15(); }
+#endif
 
 CH32GPIO::CH32GPIO(GPIO_TypeDef* port, uint16_t pin, GPIO::Direction direction,
                    GPIO::Pull pull, IRQn_Type irq)
@@ -100,11 +183,11 @@ CH32GPIO::CH32GPIO(GPIO_TypeDef* port, uint16_t pin, GPIO::Direction direction,
     map_[GetEXTIID(pin)] = this;
   }
 
-  RCC_APB2PeriphClockCmd(ch32_get_gpio_periph(port_), ENABLE);
+  ch32_clock_bus2_enable(ch32_get_gpio_periph(port_));
 
   GPIO_InitTypeDef gpio_init = {};
   gpio_init.GPIO_Pin = pin_;
-  gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
+  gpio_init.GPIO_Speed = ch32_gpio_speed_fast();
 
   switch (direction)
   {
@@ -239,7 +322,7 @@ void CH32GPIO::ConfigureEXTI(EXTITrigger_TypeDef trigger)
 
   ASSERT(port_source != 0xFF);
 
-  RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE);
+  ch32_enable_afio_clock();
   GPIO_EXTILineConfig(port_source, pin_source);
 
   exti.EXTI_Line = 1 << pin_source;

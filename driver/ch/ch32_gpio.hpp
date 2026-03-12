@@ -8,6 +8,15 @@
 namespace LibXR
 {
 
+static inline GPIOSpeed_TypeDef ch32_gpio_speed_fast()
+{
+#if defined(__CH32H417_H)
+  return GPIO_Speed_High;
+#else
+  return GPIO_Speed_50MHz;
+#endif
+}
+
 typedef enum
 {
 #if defined(GPIOA)
@@ -77,7 +86,7 @@ class CH32GPIO final : public GPIO
   {
     GPIO_InitTypeDef gpio_init = {};
     gpio_init.GPIO_Pin = pin_;
-    gpio_init.GPIO_Speed = GPIO_Speed_50MHz;
+    gpio_init.GPIO_Speed = ch32_gpio_speed_fast();
 
     switch (config.direction)
     {

@@ -45,16 +45,28 @@ static constexpr uint8_t CH32_CAN_DEFAULT_SLAVE_START_BANK = 14;
 
 static constexpr uint32_t CH32_CAN_RCC_PERIPH_MAP[] = {
 #if defined(CAN1)
+#if defined(RCC_HB1Periph_CAN1)
+    RCC_HB1Periph_CAN1,
+#else
     RCC_APB1Periph_CAN1,
 #endif
+#endif
 #if defined(CAN2)
+#if defined(RCC_HB1Periph_CAN2)
+    RCC_HB1Periph_CAN2,
+#else
     RCC_APB1Periph_CAN2,
+#endif
 #endif
 };
 
 static constexpr IRQn_Type CH32_CAN_TX_IRQ_MAP[] = {
 #if defined(CAN1)
+#if defined(__CH32H417_H)
+    CAN1_TX_IRQn,
+#else
     USB_HP_CAN1_TX_IRQn,
+#endif
 #endif
 #if defined(CAN2)
     CAN2_TX_IRQn,
@@ -63,7 +75,11 @@ static constexpr IRQn_Type CH32_CAN_TX_IRQ_MAP[] = {
 
 static constexpr IRQn_Type CH32_CAN_RX0_IRQ_MAP[] = {
 #if defined(CAN1)
+#if defined(__CH32H417_H)
+    CAN1_RX0_IRQn,
+#else
     USB_LP_CAN1_RX0_IRQn,
+#endif
 #endif
 #if defined(CAN2)
     CAN2_RX0_IRQn,
