@@ -221,12 +221,14 @@ class WchLinkRvClass : public DeviceClass
     // OptEnd without re-querying probe info.
     if (!session_started_)
     {
-      if (!IsGetProbeInfoRequest(req, req_len) && !IsAttachChipRequest(req, req_len))
+      const bool start_with_probe_info = IsGetProbeInfoRequest(req, req_len);
+      const bool start_with_attach = IsAttachChipRequest(req, req_len);
+      if (!start_with_probe_info && !start_with_attach)
       {
         ArmCommandOutIfIdle();
         return;
       }
-      PrepareFreshSessionStart();
+      PrepareFreshSessionStart(start_with_probe_info);
       session_started_ = true;
     }
 
@@ -310,7 +312,7 @@ class WchLinkRvClass : public DeviceClass
     ep->SetOnTransferCompleteCallback(cb);
   }
 
-  void PrepareFreshSessionStart()
+  void PrepareFreshSessionStart(bool clear_host_selected_chip)
   {
     // Host reconnection may leave unread/stale IN payload in previous session.
     // Reset software queue and reopen IN endpoints to guarantee the new session
@@ -318,6 +320,10 @@ class WchLinkRvClass : public DeviceClass
     pending_cmd_valid_ = false;
     pending_cmd_len_ = 0u;
     attached_ = false;
+    if (clear_host_selected_chip)
+    {
+      requested_chip_family_ = 0u;
+    }
     ExitProgramStream();
     sdi_.Close();
 
