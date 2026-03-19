@@ -227,8 +227,9 @@ class WchLinkRvClass : public DeviceClass
       // Keep host-selected chip family only for the normal in-session path:
       // GetProbeInfo -> SetSpeed(0x0C) -> Attach(0x0D/0x02).
       // Otherwise clear stale selection to avoid cross-session carry-over.
-      const bool keep_selected_chip_for_attach =
-          start_with_attach && chip_family_selected_by_speed_ && !attached_;
+      const bool keep_selected_chip_for_attach = start_with_attach &&
+                                                 chip_family_selected_by_speed_ &&
+                                                 chip_family_selected_for_next_attach_ && !attached_;
       const bool clear_host_selected_chip = !keep_selected_chip_for_attach;
       PrepareFreshSessionStart(clear_host_selected_chip);
       session_started_ = true;
@@ -340,8 +341,7 @@ class WchLinkRvClass : public DeviceClass
     attached_ = false;
     if (clear_host_selected_chip)
     {
-      requested_chip_family_ = 0u;
-      chip_family_selected_by_speed_ = false;
+      ClearHostSelectedChipFamily();
     }
     ExitProgramStream();
     ExitReadStream();
@@ -354,8 +354,7 @@ class WchLinkRvClass : public DeviceClass
   void ResetRuntimeModel()
   {
     attached_ = false;
-    requested_chip_family_ = 0u;
-    chip_family_selected_by_speed_ = false;
+    ClearHostSelectedChipFamily();
     write_region_addr_ = 0u;
     write_region_len_ = 0u;
     read_region_addr_ = 0u;
@@ -556,6 +555,13 @@ class WchLinkRvClass : public DeviceClass
     return probe_id_.chip_family;
   }
 
+  void ClearHostSelectedChipFamily()
+  {
+    requested_chip_family_ = 0u;
+    chip_family_selected_by_speed_ = false;
+    chip_family_selected_for_next_attach_ = false;
+  }
+
   void QueueDataAck(uint8_t count = 1u)
   {
     if (count == 0u)
@@ -752,6 +758,9 @@ class WchLinkRvClass : public DeviceClass
     {
       read_stream_error_ = true;
       read_stream_active_ = false;
+      attached_ = false;
+      ClearHostSelectedChipFamily();
+      sdi_.Close();
       return false;
     }
 
@@ -763,11 +772,12 @@ class WchLinkRvClass : public DeviceClass
     while (filled < chunk_bytes)
     {
       uint32_t word = 0u;
-      if (!TryReadTargetWordByAbstract(read_stream_addr_, word))
+      if (!read_stream_error_ && !TryReadTargetWordByAbstract(read_stream_addr_, word))
       {
+        // Keep the EP2 stream progressing to avoid host-side blocking on
+        // partial reads after a mid-stream SDI failure.
         read_stream_error_ = true;
-        read_stream_active_ = false;
-        return false;
+        word = 0xFFFFFFFFu;
       }
 
       const uint32_t remain = chunk_bytes - filled;
@@ -785,11 +795,20 @@ class WchLinkRvClass : public DeviceClass
     {
       read_stream_error_ = true;
       read_stream_active_ = false;
+      attached_ = false;
+      ClearHostSelectedChipFamily();
+      sdi_.Close();
       return false;
     }
     if (read_stream_remaining_ == 0u)
     {
       read_stream_active_ = false;
+      if (read_stream_error_)
+      {
+        attached_ = false;
+        ClearHostSelectedChipFamily();
+        sdi_.Close();
+      }
     }
     return true;
   }
@@ -1093,6 +1112,7 @@ class WchLinkRvClass : public DeviceClass
     }
     if (sub == 0x02u)
     {
+      chip_family_selected_for_next_attach_ = false;
       attached_ = false;
       const ErrorCode ec = sdi_.EnterSdi();
       if (ec != ErrorCode::OK)
@@ -1140,8 +1160,7 @@ class WchLinkRvClass : public DeviceClass
       ExitProgramStream();
       ExitReadStream();
       sdi_.Close();
-      requested_chip_family_ = 0u;
-      chip_family_selected_by_speed_ = false;
+      ClearHostSelectedChipFamily();
       session_started_ = false;
       const uint8_t done[1] = {0xFFu};
       return BuildStandardResponse(0x0Du, done, sizeof(done), resp, cap, out_len);
@@ -1194,6 +1213,7 @@ class WchLinkRvClass : public DeviceClass
       if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
       {
         attached_ = false;
+        ClearHostSelectedChipFamily();
         return BuildDmiNotAttachedResponse(resp, cap, out_len);
       }
       out_op = AckToDmiOp(ack);
@@ -1204,6 +1224,7 @@ class WchLinkRvClass : public DeviceClass
       if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
       {
         attached_ = false;
+        ClearHostSelectedChipFamily();
         return BuildDmiNotAttachedResponse(resp, cap, out_len);
       }
       out_data = data;
@@ -1216,6 +1237,7 @@ class WchLinkRvClass : public DeviceClass
       if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
       {
         attached_ = false;
+        ClearHostSelectedChipFamily();
         return BuildDmiNotAttachedResponse(resp, cap, out_len);
       }
       out_data = nop_resp.data;
@@ -1330,13 +1352,19 @@ class WchLinkRvClass : public DeviceClass
         {
           return BuildErrorResponse(0x55u, resp, cap, out_len);
         }
-        requested_chip_family_ = payload[0];
-        chip_family_selected_by_speed_ = (requested_chip_family_ != 0u);
+        const uint8_t requested_chip_family = payload[0];
         const uint32_t hz = DecodeSdiClockHz(payload[1]);
         const bool success = (sdi_.SetClockHz(hz) == ErrorCode::OK);
         if (success)
         {
           current_sdi_clock_hz_ = hz;
+          requested_chip_family_ = requested_chip_family;
+          chip_family_selected_by_speed_ = (requested_chip_family_ != 0u);
+          chip_family_selected_for_next_attach_ = chip_family_selected_by_speed_;
+        }
+        else
+        {
+          ClearHostSelectedChipFamily();
         }
         const uint8_t ok[1] = {static_cast<uint8_t>(success ? 0x01u : 0x00u)};
         return BuildStandardResponse(0x0Cu, ok, sizeof(ok), resp, cap, out_len);
@@ -1541,6 +1569,7 @@ class WchLinkRvClass : public DeviceClass
   uint32_t esig_reserved_word_ = 0xFFFFFFFFu;
   uint8_t requested_chip_family_ = 0u;
   bool chip_family_selected_by_speed_ = false;
+  bool chip_family_selected_for_next_attach_ = false;
   ProgramMode program_mode_ = ProgramMode::IDLE;
   bool flash_op_ready_ = false;
   uint32_t flash_op_rx_bytes_ = 0u;
