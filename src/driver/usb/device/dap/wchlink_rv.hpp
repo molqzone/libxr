@@ -299,7 +299,6 @@ class WchLinkRvClass : public DeviceClass
   void ResetRuntimeModel()
   {
     attached_ = false;
-    flash_write_stream_enabled_ = false;
     write_region_addr_ = 0u;
     write_region_len_ = 0u;
     read_region_addr_ = 0u;
@@ -471,12 +470,17 @@ class WchLinkRvClass : public DeviceClass
     program_mode_ = ProgramMode::WRITE_FLASH_OP;
     flash_op_rx_bytes_ = 0u;
     flash_op_ready_ = false;
+    flash_stream_total_raw_bytes_ = 0u;
+    flash_stream_rx_bytes_ = 0u;
+    flash_stream_next_ack_at_ = 0u;
+    pending_data_ack_ = 0u;
   }
 
   void ExitProgramStream()
   {
     program_mode_ = ProgramMode::IDLE;
-    flash_write_stream_enabled_ = false;
+    flash_op_ready_ = false;
+    flash_op_rx_bytes_ = 0u;
     flash_stream_total_raw_bytes_ = 0u;
     flash_stream_rx_bytes_ = 0u;
     flash_stream_next_ack_at_ = 0u;
@@ -485,6 +489,11 @@ class WchLinkRvClass : public DeviceClass
 
   bool EnterFlashWriteStream()
   {
+    if (!flash_op_ready_)
+    {
+      return false;
+    }
+
     flash_stream_total_raw_bytes_ = write_region_len_;
     if (flash_stream_total_raw_bytes_ == 0u)
     {
@@ -496,7 +505,6 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_rx_bytes_ = 0u;
     flash_stream_next_ack_at_ = MinU32(flash_stream_chunk_bytes_, flash_stream_total_raw_bytes_);
     pending_data_ack_ = 0u;
-    flash_write_stream_enabled_ = true;
     program_mode_ = ProgramMode::WRITE_FLASH_STREAM;
     return true;
   }
@@ -508,8 +516,22 @@ class WchLinkRvClass : public DeviceClass
       return;
     }
 
-    flash_stream_rx_bytes_ += rx_bytes;
+    if (flash_stream_rx_bytes_ >= flash_stream_total_raw_bytes_)
+    {
+      return;
+    }
+    const uint32_t remain_total = flash_stream_total_raw_bytes_ - flash_stream_rx_bytes_;
+    flash_stream_rx_bytes_ += MinU32(rx_bytes, remain_total);
+    QueueFlashWriteAcks();
+  }
 
+  bool IsFlashWriteFinished() const
+  {
+    return flash_stream_total_raw_bytes_ > 0u && flash_stream_rx_bytes_ >= flash_stream_total_raw_bytes_;
+  }
+
+  void QueueFlashWriteAcks()
+  {
     while (flash_stream_rx_bytes_ >= flash_stream_next_ack_at_)
     {
       QueueDataAck();
@@ -884,17 +906,38 @@ class WchLinkRvClass : public DeviceClass
     }
     else if (sub == 0x07u || sub == 0x0Bu)
     {
-      flash_op_ready_ = (flash_op_rx_bytes_ > 0u);
+      // Protocol sequence from analysis:
+      // 0x05 -> EP2 flash-op bytes -> 0x07/0x0B.
+      if (program_mode_ != ProgramMode::WRITE_FLASH_OP || flash_op_rx_bytes_ == 0u)
+      {
+        return BuildErrorResponse(0x55u, resp, cap, out_len);
+      }
+      flash_op_ready_ = true;
       program_mode_ = ProgramMode::IDLE;
     }
     else if (sub == 0x02u || sub == 0x04u)
     {
+      // Protocol sequence from analysis:
+      // 0x07/0x0B must complete flash-op stage before entering write stream.
+      if (program_mode_ != ProgramMode::IDLE)
+      {
+        return BuildErrorResponse(0x55u, resp, cap, out_len);
+      }
       if (!EnterFlashWriteStream())
       {
         return BuildErrorResponse(0x55u, resp, cap, out_len);
       }
     }
-    else if (sub == 0x08u || sub == 0x09u || sub == 0x01u)
+    else if (sub == 0x08u)
+    {
+      // Program End must arrive after the full write-region payload is streamed.
+      if (program_mode_ != ProgramMode::WRITE_FLASH_STREAM || !IsFlashWriteFinished())
+      {
+        return BuildErrorResponse(0x55u, resp, cap, out_len);
+      }
+      ExitProgramStream();
+    }
+    else if (sub == 0x09u || sub == 0x01u)
     {
       ExitProgramStream();
     }
@@ -1127,7 +1170,6 @@ class WchLinkRvClass : public DeviceClass
   uint8_t interface_num_ = 0u;
 
   bool attached_ = false;
-  bool flash_write_stream_enabled_ = false;
 
   enum class ProgramMode : uint8_t
   {
