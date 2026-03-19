@@ -30,11 +30,11 @@ class WchLinkRvClass : public DeviceClass
  public:
   struct ProbeIdentity
   {
-    uint8_t major = 0x02;           ///< Firmware major reported by 0x0d/0x01.
-    uint8_t minor = 0x12;           ///< Firmware minor reported by 0x0d/0x01.
-    uint8_t variant = 0x12;         ///< Link variant reported by 0x0d/0x01.
-    uint8_t chip_family = 0x0D;     ///< CH32X035 family tag in 0x0d/0x02.
-    uint32_t chip_id = 0x03510611;  ///< CH32X035C8T6 example chip-id.
+    uint8_t major = 0x02;     ///< Firmware major reported by 0x0d/0x01.
+    uint8_t minor = 0x12;     ///< Firmware minor reported by 0x0d/0x01.
+    uint8_t variant = 0x12;   ///< Link variant reported by 0x0d/0x01.
+    uint8_t chip_family = 0u; ///< Runtime-detected or host-selected family code.
+    uint32_t chip_id = 0u;    ///< Runtime-detected chip id.
   };
 
   explicit WchLinkRvClass(
@@ -395,6 +395,229 @@ class WchLinkRvClass : public DeviceClass
     return ErrorCode::OK;
   }
 
+  static bool IsDmHalted(uint32_t dmstatus)
+  {
+    return (dmstatus & (1u << 9u)) != 0u && (dmstatus & (1u << 8u)) != 0u;
+  }
+
+  static bool IsDmRunning(uint32_t dmstatus)
+  {
+    return (dmstatus & (1u << 11u)) != 0u && (dmstatus & (1u << 10u)) != 0u;
+  }
+
+  bool DmiReadWord(uint8_t addr, uint32_t& data)
+  {
+    LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
+    const ErrorCode ec = sdi_.DmiReadTxn(addr, data, ack);
+    return ec == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK;
+  }
+
+  bool DmiWriteWord(uint8_t addr, uint32_t data)
+  {
+    LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
+    const ErrorCode ec = sdi_.DmiWriteTxn(addr, data, ack);
+    return ec == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK;
+  }
+
+  bool ClearAbstractCommandError() { return DmiWriteWord(kDmiAbstractcs, 0x00000700u); }
+
+  bool WaitAbstractCommandDone()
+  {
+    for (uint8_t i = 0u; i < 32u; ++i)
+    {
+      uint32_t abstractcs = 0u;
+      if (!DmiReadWord(kDmiAbstractcs, abstractcs))
+      {
+        return false;
+      }
+      if ((abstractcs & (1u << 12u)) != 0u)
+      {
+        continue;
+      }
+      if (((abstractcs >> 8u) & 0x7u) != 0u)
+      {
+        (void)ClearAbstractCommandError();
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  bool RunAbstractCommand(uint32_t command)
+  {
+    if (!DmiWriteWord(kDmiCommand, command))
+    {
+      return false;
+    }
+    return WaitAbstractCommandDone();
+  }
+
+  bool EnsureHartHaltedForProbe(bool& need_resume)
+  {
+    need_resume = false;
+    uint32_t dmstatus = 0u;
+    if (!DmiReadWord(kDmiDmstatus, dmstatus))
+    {
+      return false;
+    }
+    if (IsDmHalted(dmstatus))
+    {
+      return true;
+    }
+
+    if (!DmiWriteWord(kDmiDmcontrol, 0x80000001u))
+    {
+      return false;
+    }
+
+    for (uint8_t i = 0u; i < 32u; ++i)
+    {
+      if (!DmiReadWord(kDmiDmstatus, dmstatus))
+      {
+        return false;
+      }
+      if (IsDmHalted(dmstatus))
+      {
+        if (!DmiWriteWord(kDmiDmcontrol, 0x00000001u))
+        {
+          return false;
+        }
+        need_resume = true;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void TryResumeHartAfterProbe(bool need_resume)
+  {
+    if (!need_resume)
+    {
+      return;
+    }
+
+    (void)DmiWriteWord(kDmiDmcontrol, 0x40000001u);
+    for (uint8_t i = 0u; i < 16u; ++i)
+    {
+      uint32_t dmstatus = 0u;
+      if (!DmiReadWord(kDmiDmstatus, dmstatus))
+      {
+        break;
+      }
+      if (IsDmRunning(dmstatus))
+      {
+        break;
+      }
+    }
+    (void)DmiWriteWord(kDmiDmcontrol, 0x00000001u);
+  }
+
+  bool TryReadTargetWordByAbstract(uint32_t addr, uint32_t& data)
+  {
+    if (!DmiWriteWord(kDmiProgbuf0, 0x0002A303u))  // lw x6, 0(x5)
+    {
+      return false;
+    }
+    if (!DmiWriteWord(kDmiProgbuf1, 0x00100073u))  // ebreak
+    {
+      return false;
+    }
+    if (!DmiWriteWord(kDmiData0, addr))
+    {
+      return false;
+    }
+    if (!ClearAbstractCommandError())
+    {
+      return false;
+    }
+    if (!RunAbstractCommand(0x00271005u))  // x5 <- data0 with postexec
+    {
+      return false;
+    }
+    if (!RunAbstractCommand(0x00221006u))  // data0 <- x6
+    {
+      return false;
+    }
+    return DmiReadWord(kDmiData0, data);
+  }
+
+  bool TryProbeChipIdentity(uint32_t& chip_id_out, uint8_t& chip_family_out)
+  {
+    bool need_resume = false;
+    if (!EnsureHartHaltedForProbe(need_resume))
+    {
+      return false;
+    }
+
+    bool ok = true;
+    uint32_t chip_id = 0u;
+    do
+    {
+      if (!TryReadTargetWordByAbstract(kChipIdAddress, chip_id))
+      {
+        ok = false;
+        break;
+      }
+      if (chip_id == 0u || chip_id == 0xFFFFFFFFu)
+      {
+        ok = false;
+        break;
+      }
+
+      chip_id_out = chip_id;
+      if (requested_chip_family_ != 0u)
+      {
+        chip_family_out = requested_chip_family_;
+      }
+      else
+      {
+        chip_family_out = probe_id_.chip_family;
+      }
+
+      uint32_t flash_size = 0u;
+      if (TryReadTargetWordByAbstract(kFlashSizeAddress, flash_size))
+      {
+        esig_flash_size_kb_ = static_cast<uint16_t>(flash_size & 0xFFFFu);
+      }
+
+      uint32_t uid0 = 0u;
+      if (TryReadTargetWordByAbstract(kUidWord0Address, uid0))
+      {
+        esig_uid_word0_ = uid0;
+      }
+
+      uint32_t uid1 = 0u;
+      if (TryReadTargetWordByAbstract(kUidWord1Address, uid1))
+      {
+        esig_uid_word1_ = uid1;
+      }
+    } while (false);
+
+    TryResumeHartAfterProbe(need_resume);
+    return ok;
+  }
+
+  ErrorCode BuildEsigV2Response(uint8_t* resp, uint16_t cap, uint16_t& out_len) const
+  {
+    if (!resp || cap < 20u)
+    {
+      out_len = 0u;
+      return ErrorCode::NOT_FOUND;
+    }
+
+    resp[0] = 0xFFu;
+    resp[1] = 0xFFu;
+    resp[2] = static_cast<uint8_t>(esig_flash_size_kb_ >> 8u);
+    resp[3] = static_cast<uint8_t>(esig_flash_size_kb_);
+    StoreBe32(resp + 4u, esig_uid_word0_);
+    StoreBe32(resp + 8u, esig_uid_word1_);
+    StoreBe32(resp + 12u, esig_reserved_word_);
+    StoreBe32(resp + 16u, probe_id_.chip_id);
+    out_len = 20u;
+    return ErrorCode::OK;
+  }
+
   ErrorCode HandleControlCommand(const uint8_t* payload, uint16_t payload_len, uint8_t* resp,
                                  uint16_t cap, uint16_t& out_len)
   {
@@ -418,6 +641,15 @@ class WchLinkRvClass : public DeviceClass
         return BuildErrorResponse(0x55u, resp, cap, out_len);
       }
       attached_ = true;
+
+      uint32_t chip_id = probe_id_.chip_id;
+      uint8_t chip_family = (requested_chip_family_ != 0u) ? requested_chip_family_ : probe_id_.chip_family;
+      if (TryProbeChipIdentity(chip_id, chip_family))
+      {
+        probe_id_.chip_id = chip_id;
+        probe_id_.chip_family = chip_family;
+      }
+
       const uint8_t attach[5] = {
           probe_id_.chip_family,
           static_cast<uint8_t>(probe_id_.chip_id >> 24),
@@ -572,6 +804,7 @@ class WchLinkRvClass : public DeviceClass
         {
           return BuildErrorResponse(0x55u, resp, cap, out_len);
         }
+        requested_chip_family_ = payload[0];
         const uint32_t hz = DecodeSdiClockHz(payload[1]);
         const bool success = (sdi_.SetClockHz(hz) == ErrorCode::OK);
         if (success)
@@ -583,15 +816,9 @@ class WchLinkRvClass : public DeviceClass
       }
       case 0x11u:
       {
-        // WCH V2 ESIG raw response (non 0x82-framed format).
-        static constexpr uint8_t kEsigRaw[] = {
-            0xFF, 0xFF, 0x00, 0x3E, 0x2E, 0x86, 0xAB, 0xCD, 0x96, 0x76,
-            0xBC, 0x23, 0xFF, 0xFF, 0xFF, 0xFF, 0x03, 0x51, 0x06, 0x11};
-        if (payload_len == 1u && payload[0] == 0x06u && cap >= sizeof(kEsigRaw))
+        if (payload_len == 1u && payload[0] == 0x06u)
         {
-          std::memcpy(resp, kEsigRaw, sizeof(kEsigRaw));
-          out_len = sizeof(kEsigRaw);
-          return ErrorCode::OK;
+          return BuildEsigV2Response(resp, cap, out_len);
         }
         return BuildErrorResponse(0x55u, resp, cap, out_len);
       }
@@ -715,6 +942,17 @@ class WchLinkRvClass : public DeviceClass
   static constexpr uint32_t kSdiClockHzLow = 400'000u;
   static constexpr uint32_t kSdiClockHzMedium = 4'000'000u;
   static constexpr uint32_t kSdiClockHzHigh = 6'000'000u;
+  static constexpr uint8_t kDmiData0 = 0x04u;
+  static constexpr uint8_t kDmiDmcontrol = 0x10u;
+  static constexpr uint8_t kDmiDmstatus = 0x11u;
+  static constexpr uint8_t kDmiAbstractcs = 0x16u;
+  static constexpr uint8_t kDmiCommand = 0x17u;
+  static constexpr uint8_t kDmiProgbuf0 = 0x20u;
+  static constexpr uint8_t kDmiProgbuf1 = 0x21u;
+  static constexpr uint32_t kChipIdAddress = 0x1FFFF704u;
+  static constexpr uint32_t kFlashSizeAddress = 0x1FFFF7E0u;
+  static constexpr uint32_t kUidWord0Address = 0x1FFFF7E8u;
+  static constexpr uint32_t kUidWord1Address = 0x1FFFF7ECu;
 
   static bool IsGetProbeInfoRequest(const uint8_t* req, uint16_t req_len)
   {
@@ -757,6 +995,11 @@ class WchLinkRvClass : public DeviceClass
   uint32_t read_region_addr_ = 0u;
   uint32_t read_region_len_ = 0u;
   uint32_t current_sdi_clock_hz_ = kSdiClockHzHigh;
+  uint16_t esig_flash_size_kb_ = 0u;
+  uint32_t esig_uid_word0_ = 0u;
+  uint32_t esig_uid_word1_ = 0u;
+  uint32_t esig_reserved_word_ = 0xFFFFFFFFu;
+  uint8_t requested_chip_family_ = 0u;
 
   std::array<uint8_t, 96> pending_cmd_buf_ = {};
   uint16_t pending_cmd_len_ = 0u;
