@@ -214,22 +214,27 @@ class WchLinkRvClass : public DeviceClass
   {
     const auto* req = static_cast<const uint8_t*>(data.addr_);
     const uint16_t req_len = static_cast<uint16_t>(data.size_);
+    const bool start_with_probe_info = IsGetProbeInfoRequest(req, req_len);
+    const bool start_with_attach = IsAttachChipRequest(req, req_len);
 
     // Drop stale queued OUT frames from prior sessions until the host starts
     // with a clean GetProbeInfo transaction. Accept AttachChip as an
     // alternative start marker because some host flows reattach directly after
     // OptEnd without re-querying probe info.
-    if (!session_started_)
+    if (start_with_probe_info || start_with_attach)
     {
-      const bool start_with_probe_info = IsGetProbeInfoRequest(req, req_len);
-      const bool start_with_attach = IsAttachChipRequest(req, req_len);
-      if (!start_with_probe_info && !start_with_attach)
-      {
-        ArmCommandOutIfIdle();
-        return;
-      }
-      PrepareFreshSessionStart(start_with_probe_info);
+      // Treat GetProbeInfo/Attach as a fresh command-plane boundary.
+      // If Attach appears while a session is still marked active, clear the
+      // host-selected chip family to avoid stale carry-over across host
+      // reconnects that missed OptEnd.
+      const bool clear_host_selected_chip = start_with_probe_info || session_started_;
+      PrepareFreshSessionStart(clear_host_selected_chip);
       session_started_ = true;
+    }
+    else if (!session_started_)
+    {
+      ArmCommandOutIfIdle();
+      return;
     }
 
     uint16_t out_len = 0u;
@@ -334,6 +339,7 @@ class WchLinkRvClass : public DeviceClass
   void ResetRuntimeModel()
   {
     attached_ = false;
+    requested_chip_family_ = 0u;
     write_region_addr_ = 0u;
     write_region_len_ = 0u;
     read_region_addr_ = 0u;
@@ -883,6 +889,7 @@ class WchLinkRvClass : public DeviceClass
       attached_ = false;
       ExitProgramStream();
       sdi_.Close();
+      requested_chip_family_ = 0u;
       session_started_ = false;
       const uint8_t done[1] = {0xFFu};
       return BuildStandardResponse(0x0Du, done, sizeof(done), resp, cap, out_len);
