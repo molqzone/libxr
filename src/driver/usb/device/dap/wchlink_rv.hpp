@@ -354,6 +354,50 @@ class WchLinkRvClass : public DeviceClass
     }
   }
 
+  static bool IsFlashOpLengthValid(uint8_t chip_family, uint32_t bytes)
+  {
+    // Length table is derived from wlink flash_op defaults (and known alt
+    // variants) to guard program stage 0x07/0x0B against partial/garbled EP2
+    // payloads.
+    switch (chip_family)
+    {
+      case 0x01u:  // CH32V103
+        return bytes == 494u;
+      case 0x02u:  // CH57X
+        return bytes == 1102u;
+      case 0x03u:  // CH56X
+        return bytes == 1156u;
+      case 0x05u:  // CH32V20X
+      case 0x06u:  // CH32V30X
+        return bytes == 446u;
+      case 0x07u:  // CH582/583
+      case 0x0Bu:  // CH59X
+      case 0x4Bu:  // CH585
+        return bytes == 1326u;
+      case 0x09u:  // CH32V003
+      case 0x49u:  // CH641
+        return bytes == 498u || bytes == 466u;
+      case 0x0Au:  // CH8571
+        return bytes == 1408u || bytes == 1386u;
+      case 0x0Cu:  // CH643
+      case 0x0Du:  // CH32X035
+        return bytes == 488u;
+      case 0x0Eu:  // CH32L103
+        return bytes == 512u;
+      case 0x0Fu:  // CH564
+        return bytes == 1532u;
+      case 0x4Eu:  // CH32V007
+        return bytes == 500u;
+      case 0x46u:  // CH645
+        return bytes == 440u || bytes == 486u;
+      case 0x86u:  // CH32V317
+        return bytes == 440u || bytes == 460u;
+      default:
+        // Unknown family: keep compatibility, but still reject empty flash-op.
+        return bytes > 0u;
+    }
+  }
+
   static uint32_t MinU32(uint32_t a, uint32_t b) { return (a < b) ? a : b; }
 
   static uint8_t AckToDmiOp(LibXR::Debug::Sdi::Ack ack)
@@ -908,7 +952,8 @@ class WchLinkRvClass : public DeviceClass
     {
       // Protocol sequence from analysis:
       // 0x05 -> EP2 flash-op bytes -> 0x07/0x0B.
-      if (program_mode_ != ProgramMode::WRITE_FLASH_OP || flash_op_rx_bytes_ == 0u)
+      if (program_mode_ != ProgramMode::WRITE_FLASH_OP ||
+          !IsFlashOpLengthValid(ActiveChipFamily(), flash_op_rx_bytes_))
       {
         return BuildErrorResponse(0x55u, resp, cap, out_len);
       }
@@ -930,8 +975,10 @@ class WchLinkRvClass : public DeviceClass
     }
     else if (sub == 0x08u)
     {
+      FlushPendingDataAck();
       // Program End must arrive after the full write-region payload is streamed.
-      if (program_mode_ != ProgramMode::WRITE_FLASH_STREAM || !IsFlashWriteFinished())
+      if (program_mode_ != ProgramMode::WRITE_FLASH_STREAM || !IsFlashWriteFinished() ||
+          pending_data_ack_ != 0u)
       {
         return BuildErrorResponse(0x55u, resp, cap, out_len);
       }
