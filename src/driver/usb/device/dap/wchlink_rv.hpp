@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "debug/swd.hpp"
+#include "debug/sdi.hpp"
 #include "dev_core.hpp"
 #include "gpio.hpp"
 #include "libxr_def.hpp"
@@ -21,11 +21,10 @@ namespace LibXR::USB
  * - Command plane: EP1 OUT (0x01), EP1 IN (0x81)
  * - Data plane:    EP2 OUT (0x02), EP2 IN (0x82)
  *
- * Current goal is protocol bring-up for host-side command sequencing.
- * SWD execution paths are intentionally simplified and mapped to a small
- * emulated DM register model so the link layer can be validated first.
+ * Current goal is protocol bring-up for host-side command sequencing with
+ * real SDI DMI transactions.
  */
-template <typename SwdPort>
+template <typename SdiPort>
 class WchLinkRvClass : public DeviceClass
 {
  public:
@@ -39,10 +38,10 @@ class WchLinkRvClass : public DeviceClass
   };
 
   explicit WchLinkRvClass(
-      SwdPort& swd_link, LibXR::GPIO* nreset_gpio = nullptr,
+      SdiPort& sdi_link, LibXR::GPIO* nreset_gpio = nullptr,
       Endpoint::EPNumber command_ep_num = Endpoint::EPNumber::EP1,
       Endpoint::EPNumber data_ep_num = Endpoint::EPNumber::EP2)
-      : swd_(swd_link),
+      : sdi_(sdi_link),
         nreset_gpio_(nreset_gpio),
         command_ep_num_(command_ep_num),
         data_ep_num_(data_ep_num)
@@ -58,9 +57,9 @@ class WchLinkRvClass : public DeviceClass
   void SetProbeIdentity(const ProbeIdentity& id) { probe_id_ = id; }
 
   /**
-   * @brief For future hardware mode, expose direct SWD access.
+   * @brief For future hardware mode, expose direct SDI access.
    */
-  SwdPort& SwdLink() { return swd_; }
+  SdiPort& SdiLink() { return sdi_; }
 
  protected:
   void BindEndpoints(EndpointPool& endpoint_pool, uint8_t start_itf_num, bool) override
@@ -76,6 +75,16 @@ class WchLinkRvClass : public DeviceClass
     ASSERT(ec == ErrorCode::OK);
     ec = endpoint_pool.Get(ep_data_in_, Endpoint::Direction::IN, data_ep_num_);
     ASSERT(ec == ErrorCode::OK);
+
+    // Cold-start cleanup: clear any residual state/packet from previous sessions.
+    ep_cmd_out_->Close();
+    ep_cmd_in_->Close();
+    ep_data_out_->Close();
+    ep_data_in_->Close();
+    ep_cmd_out_->SetActiveLength(0u);
+    ep_cmd_in_->SetActiveLength(0u);
+    ep_data_out_->SetActiveLength(0u);
+    ep_data_in_->SetActiveLength(0u);
 
     ep_cmd_out_->Configure(
         {Endpoint::Direction::OUT, Endpoint::Type::BULK, CMD_PACKET_SIZE, false});
@@ -129,6 +138,7 @@ class WchLinkRvClass : public DeviceClass
     SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
 
     pending_cmd_valid_ = false;
+    session_started_ = false;
     ResetRuntimeModel();
 
     inited_ = true;
@@ -140,13 +150,14 @@ class WchLinkRvClass : public DeviceClass
   {
     inited_ = false;
     pending_cmd_valid_ = false;
+    session_started_ = false;
 
     ReleaseEndpoint(endpoint_pool, ep_cmd_in_);
     ReleaseEndpoint(endpoint_pool, ep_cmd_out_);
     ReleaseEndpoint(endpoint_pool, ep_data_in_);
     ReleaseEndpoint(endpoint_pool, ep_data_out_);
 
-    swd_.Close();
+    sdi_.Close();
     ResetRuntimeModel();
   }
 
@@ -201,6 +212,21 @@ class WchLinkRvClass : public DeviceClass
 
   void OnCommandOut(bool /*in_isr*/, LibXR::ConstRawData& data)
   {
+    const auto* req = static_cast<const uint8_t*>(data.addr_);
+    const uint16_t req_len = static_cast<uint16_t>(data.size_);
+
+    // Drop stale queued OUT frames from prior sessions until the host starts
+    // with a clean GetProbeInfo transaction.
+    if (!session_started_)
+    {
+      if (!IsGetProbeInfoRequest(req, req_len))
+      {
+        ArmCommandOutIfIdle();
+        return;
+      }
+      session_started_ = true;
+    }
+
     uint16_t out_len = 0u;
     auto tx = ep_cmd_in_ ? ep_cmd_in_->GetBuffer() : RawData{nullptr, 0};
     if (!tx.addr_ || tx.size_ == 0u)
@@ -210,8 +236,6 @@ class WchLinkRvClass : public DeviceClass
     }
 
     auto* resp = static_cast<uint8_t*>(tx.addr_);
-    const auto* req = static_cast<const uint8_t*>(data.addr_);
-    const uint16_t req_len = static_cast<uint16_t>(data.size_);
 
     (void)HandleCommand(req, req_len, resp, static_cast<uint16_t>(tx.size_), out_len);
     if (!TryStartCommandIn(out_len))
@@ -223,14 +247,13 @@ class WchLinkRvClass : public DeviceClass
         pending_cmd_valid_ = true;
       }
     }
-
-    ArmCommandOutIfIdle();
   }
 
   void OnCommandIn(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
   {
     if (!pending_cmd_valid_)
     {
+      ArmCommandOutIfIdle();
       return;
     }
 
@@ -239,6 +262,7 @@ class WchLinkRvClass : public DeviceClass
     {
       pending_cmd_valid_ = false;
       pending_cmd_len_ = 0u;
+      ArmCommandOutIfIdle();
       return;
     }
 
@@ -247,7 +271,10 @@ class WchLinkRvClass : public DeviceClass
     {
       pending_cmd_valid_ = false;
       pending_cmd_len_ = 0u;
+      return;
     }
+
+    ArmCommandOutIfIdle();
   }
 
   void OnDataOut(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
@@ -269,16 +296,7 @@ class WchLinkRvClass : public DeviceClass
     write_region_len_ = 0u;
     read_region_addr_ = 0u;
     read_region_len_ = 0u;
-    reg_dpc_ = 0u;
-    gpr_.fill(0u);
-    dmi_regs_.fill(0u);
-
-    dmi_regs_[0x10] = 0x80000001u;  // dmcontrol
-    dmi_regs_[0x11] = 0x00000382u;  // dmstatus (halted/auth/version=2)
-    dmi_regs_[0x12] = 0x00312380u;  // hartinfo
-    dmi_regs_[0x16] = 0x08000002u;  // abstractcs
-    dmi_regs_[0x40] = 0x00000001u;  // haltsum0
-    dmi_regs_[0x04] = 0x00000000u;  // data0
+    current_sdi_clock_hz_ = kSdiClockHzHigh;
   }
 
   static uint32_t LoadBe32(const uint8_t* p)
@@ -293,6 +311,53 @@ class WchLinkRvClass : public DeviceClass
     p[1] = static_cast<uint8_t>(v >> 16);
     p[2] = static_cast<uint8_t>(v >> 8);
     p[3] = static_cast<uint8_t>(v);
+  }
+
+  static uint32_t DecodeSdiClockHz(uint8_t speed_code)
+  {
+    switch (speed_code)
+    {
+      case 0x03u:
+        return kSdiClockHzLow;
+      case 0x02u:
+        return kSdiClockHzMedium;
+      case 0x01u:
+      default:
+        return kSdiClockHzHigh;
+    }
+  }
+
+  static uint8_t AckToDmiOp(LibXR::Debug::Sdi::Ack ack)
+  {
+    switch (ack)
+    {
+      case LibXR::Debug::Sdi::Ack::OK:
+        return 0x00u;
+      case LibXR::Debug::Sdi::Ack::BUSY:
+        return 0x03u;
+      case LibXR::Debug::Sdi::Ack::FAILED:
+      case LibXR::Debug::Sdi::Ack::RESERVED:
+      case LibXR::Debug::Sdi::Ack::PROTOCOL:
+      default:
+        return 0x02u;
+    }
+  }
+
+  static ErrorCode BuildDmiResponse(uint8_t addr, uint32_t data, uint8_t op, uint8_t* resp,
+                                    uint16_t cap, uint16_t& out_len)
+  {
+    uint8_t dmi_resp[6] = {};
+    dmi_resp[0] = addr;
+    StoreBe32(dmi_resp + 1u, data);
+    dmi_resp[5] = op;
+    return BuildStandardResponse(0x08u, dmi_resp, sizeof(dmi_resp), resp, cap, out_len);
+  }
+
+  static ErrorCode BuildDmiNotAttachedResponse(uint8_t* resp, uint16_t cap, uint16_t& out_len)
+  {
+    // Follow host-side not-attached sentinel used by wlink:
+    // addr=0x7d, data=0xffffffff, op=0x03(busy).
+    return BuildDmiResponse(0x7Du, 0xFFFFFFFFu, 0x03u, resp, cap, out_len);
   }
 
   static ErrorCode BuildErrorResponse(uint8_t reason, uint8_t* resp, uint16_t cap,
@@ -346,6 +411,12 @@ class WchLinkRvClass : public DeviceClass
     }
     if (sub == 0x02u)
     {
+      const ErrorCode ec = sdi_.EnterSdi();
+      if (ec != ErrorCode::OK)
+      {
+        attached_ = false;
+        return BuildErrorResponse(0x55u, resp, cap, out_len);
+      }
       attached_ = true;
       const uint8_t attach[5] = {
           probe_id_.chip_family,
@@ -359,6 +430,7 @@ class WchLinkRvClass : public DeviceClass
     {
       attached_ = false;
       flash_write_stream_enabled_ = false;
+      sdi_.Close();
       const uint8_t done[1] = {0xFFu};
       return BuildStandardResponse(0x0Du, done, sizeof(done), resp, cap, out_len);
     }
@@ -383,57 +455,6 @@ class WchLinkRvClass : public DeviceClass
     return BuildStandardResponse(0x06u, &value, 1u, resp, cap, out_len);
   }
 
-  void HandleAbstractCommandWrite(uint32_t cmd)
-  {
-    const uint32_t op = cmd & 0xFFFF0000u;
-    const uint16_t regno = static_cast<uint16_t>(cmd & 0x0000FFFFu);
-
-    if (op == 0x00220000u)
-    {
-      dmi_regs_[0x04] = ReadPseudoRegister(regno);
-      return;
-    }
-
-    if (op == 0x00230000u)
-    {
-      WritePseudoRegister(regno, dmi_regs_[0x04]);
-    }
-  }
-
-  uint32_t ReadPseudoRegister(uint16_t regno) const
-  {
-    if (regno == 0x0301u)
-    {
-      return 0x40901105u;  // misa
-    }
-    if (regno == 0x0F12u)
-    {
-      return 0xDC68D883u;  // marchid
-    }
-    if (regno == 0x07B1u)
-    {
-      return reg_dpc_;
-    }
-    if (regno >= 0x1000u && regno < 0x1020u)
-    {
-      return gpr_[regno - 0x1000u];
-    }
-    return 0u;
-  }
-
-  void WritePseudoRegister(uint16_t regno, uint32_t value)
-  {
-    if (regno == 0x07B1u)
-    {
-      reg_dpc_ = value;
-      return;
-    }
-    if (regno >= 0x1000u && regno < 0x1020u)
-    {
-      gpr_[regno - 0x1000u] = value;
-    }
-  }
-
   ErrorCode HandleDmiCommand(const uint8_t* payload, uint16_t payload_len, uint8_t* resp,
                              uint16_t cap, uint16_t& out_len)
   {
@@ -442,55 +463,58 @@ class WchLinkRvClass : public DeviceClass
       return BuildErrorResponse(0x55u, resp, cap, out_len);
     }
 
+    if (!attached_)
+    {
+      return BuildDmiNotAttachedResponse(resp, cap, out_len);
+    }
+
     const uint8_t addr = payload[0];
     const uint32_t data = LoadBe32(payload + 1u);
     const uint8_t op = payload[5];
 
-    uint32_t out_data = dmi_regs_[addr];
+    uint32_t out_data = 0u;
     uint8_t out_op = 0x00u;
+    LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
 
     if (op == 0x01u)
     {
-      out_data = dmi_regs_[addr];
+      const ErrorCode ec = sdi_.DmiReadTxn(addr, out_data, ack);
+      if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
+      {
+        attached_ = false;
+        return BuildDmiNotAttachedResponse(resp, cap, out_len);
+      }
+      out_op = AckToDmiOp(ack);
     }
     else if (op == 0x02u)
     {
-      dmi_regs_[addr] = data;
+      const ErrorCode ec = sdi_.DmiWriteTxn(addr, data, ack);
+      if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
+      {
+        attached_ = false;
+        return BuildDmiNotAttachedResponse(resp, cap, out_len);
+      }
       out_data = data;
-
-      if (addr == 0x17u)
-      {
-        HandleAbstractCommandWrite(data);
-      }
-      else if (addr == 0x10u)
-      {
-        // Emulate halt/resume bits transition for host polling.
-        if ((data & 0x80000000u) != 0u)
-        {
-          dmi_regs_[0x11] |= (1u << 9u) | (1u << 8u);
-          dmi_regs_[0x11] &= ~((1u << 11u) | (1u << 10u));
-        }
-        if ((data & 0x40000000u) != 0u)
-        {
-          dmi_regs_[0x11] |= (1u << 11u) | (1u << 10u);
-          dmi_regs_[0x11] &= ~((1u << 9u) | (1u << 8u));
-        }
-      }
+      out_op = AckToDmiOp(ack);
     }
     else if (op == 0x00u)
     {
-      out_data = dmi_regs_[addr];
+      LibXR::Debug::Sdi::Response nop_resp = {};
+      const ErrorCode ec = sdi_.TransferWithRetry({addr, 0u, LibXR::Debug::Sdi::Op::NOP}, nop_resp);
+      if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
+      {
+        attached_ = false;
+        return BuildDmiNotAttachedResponse(resp, cap, out_len);
+      }
+      out_data = nop_resp.data;
+      out_op = AckToDmiOp(nop_resp.ack);
     }
     else
     {
       out_op = 0x02u;  // failed
     }
 
-    uint8_t dmi_resp[6] = {};
-    dmi_resp[0] = addr;
-    StoreBe32(dmi_resp + 1u, out_data);
-    dmi_resp[5] = out_op;
-    return BuildStandardResponse(0x08u, dmi_resp, sizeof(dmi_resp), resp, cap, out_len);
+    return BuildDmiResponse(addr, out_data, out_op, resp, cap, out_len);
   }
 
   ErrorCode HandleProgramCommand(const uint8_t* payload, uint16_t payload_len, uint8_t* resp,
@@ -529,7 +553,9 @@ class WchLinkRvClass : public DeviceClass
     const uint8_t cmd = req[1];
     const uint8_t payload_len_u8 = req[2];
     const uint16_t payload_len = payload_len_u8;
-    if (req_len != static_cast<uint16_t>(payload_len + 3u))
+    // Some host stacks/drivers may deliver a padded frame with trailing bytes.
+    // Keep protocol parsing based on declared payload length and ignore tail.
+    if (req_len < static_cast<uint16_t>(payload_len + 3u))
     {
       return BuildErrorResponse(0x55u, resp, cap, out_len);
     }
@@ -542,7 +568,17 @@ class WchLinkRvClass : public DeviceClass
         return HandleControlCommand(payload, payload_len, resp, cap, out_len);
       case 0x0Cu:
       {
-        const uint8_t ok[1] = {0x01u};
+        if (!payload || payload_len < 2u)
+        {
+          return BuildErrorResponse(0x55u, resp, cap, out_len);
+        }
+        const uint32_t hz = DecodeSdiClockHz(payload[1]);
+        const bool success = (sdi_.SetClockHz(hz) == ErrorCode::OK);
+        if (success)
+        {
+          current_sdi_clock_hz_ = hz;
+        }
+        const uint8_t ok[1] = {static_cast<uint8_t>(success ? 0x01u : 0x00u)};
         return BuildStandardResponse(0x0Cu, ok, sizeof(ok), resp, cap, out_len);
       }
       case 0x11u:
@@ -676,6 +712,15 @@ class WchLinkRvClass : public DeviceClass
   static constexpr uint16_t CMD_PACKET_SIZE = 64u;
   static constexpr uint16_t DATA_PACKET_SIZE = 64u;
   static constexpr std::array<uint8_t, 4> DATA_ACK_FRAME = {0x41u, 0x01u, 0x01u, 0x04u};
+  static constexpr uint32_t kSdiClockHzLow = 400'000u;
+  static constexpr uint32_t kSdiClockHzMedium = 4'000'000u;
+  static constexpr uint32_t kSdiClockHzHigh = 6'000'000u;
+
+  static bool IsGetProbeInfoRequest(const uint8_t* req, uint16_t req_len)
+  {
+    return req != nullptr && req_len >= 4u && req[0] == 0x81u && req[1] == 0x0Du &&
+           req[2] == 0x01u && req[3] == 0x01u;
+  }
 
 #pragma pack(push, 1)
   struct WchLinkRvDescBlock
@@ -690,7 +735,7 @@ class WchLinkRvClass : public DeviceClass
 
   ProbeIdentity probe_id_{};
 
-  SwdPort& swd_;
+  SdiPort& sdi_;
   LibXR::GPIO* nreset_gpio_ = nullptr;
 
   Endpoint::EPNumber command_ep_num_;
@@ -711,14 +756,12 @@ class WchLinkRvClass : public DeviceClass
   uint32_t write_region_len_ = 0u;
   uint32_t read_region_addr_ = 0u;
   uint32_t read_region_len_ = 0u;
-
-  uint32_t reg_dpc_ = 0u;
-  std::array<uint32_t, 32> gpr_ = {};
-  std::array<uint32_t, 256> dmi_regs_ = {};
+  uint32_t current_sdi_clock_hz_ = kSdiClockHzHigh;
 
   std::array<uint8_t, 96> pending_cmd_buf_ = {};
   uint16_t pending_cmd_len_ = 0u;
   bool pending_cmd_valid_ = false;
+  bool session_started_ = false;
 
   LibXR::Callback<LibXR::ConstRawData&> on_cmd_out_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnCommandOutStatic, this);
@@ -731,4 +774,3 @@ class WchLinkRvClass : public DeviceClass
 };
 
 }  // namespace LibXR::USB
-
