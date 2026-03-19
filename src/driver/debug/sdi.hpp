@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "libxr_def.hpp"
+#include "sdi_protocol.hpp"
 
 namespace LibXR::Debug
 {
@@ -27,51 +28,10 @@ class Sdi
     uint8_t idle_cycles = 0;    ///< 每次传输尝试后插入的空闲周期。
   };
 
-  /**
-   * @enum Op
-   * @brief DMI 操作类型。
-   */
-  enum class Op : uint8_t
-  {
-    NOP = 0x00,
-    READ = 0x01,
-    WRITE = 0x02,
-  };
-
-  /**
-   * @enum Ack
-   * @brief DMI 响应状态（与 WCH-Link RV `CMD=0x08` op 字段一致）。
-   */
-  enum class Ack : uint8_t
-  {
-    OK = 0x00,
-    RESERVED = 0x01,
-    FAILED = 0x02,
-    BUSY = 0x03,
-    PROTOCOL = 0xFF,
-  };
-
-  /**
-   * @struct Request
-   * @brief DMI 请求包。
-   */
-  struct Request
-  {
-    uint8_t addr = 0;
-    uint32_t data = 0;
-    Op op = Op::NOP;
-  };
-
-  /**
-   * @struct Response
-   * @brief DMI 响应包。
-   */
-  struct Response
-  {
-    uint8_t addr = 0;
-    uint32_t data = 0;
-    Ack ack = Ack::PROTOCOL;
-  };
+  using Op = SdiProtocol::Op;
+  using Ack = SdiProtocol::Ack;
+  using Request = SdiProtocol::Request;
+  using Response = SdiProtocol::Response;
 
   virtual ~Sdi() = default;
 
@@ -192,4 +152,3 @@ class Sdi
 };
 
 }  // namespace LibXR::Debug
-
