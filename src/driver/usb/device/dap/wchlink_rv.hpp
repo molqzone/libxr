@@ -216,10 +216,12 @@ class WchLinkRvClass : public DeviceClass
     const uint16_t req_len = static_cast<uint16_t>(data.size_);
 
     // Drop stale queued OUT frames from prior sessions until the host starts
-    // with a clean GetProbeInfo transaction.
+    // with a clean GetProbeInfo transaction. Accept AttachChip as an
+    // alternative start marker because some host flows reattach directly after
+    // OptEnd without re-querying probe info.
     if (!session_started_)
     {
-      if (!IsGetProbeInfoRequest(req, req_len))
+      if (!IsGetProbeInfoRequest(req, req_len) && !IsAttachChipRequest(req, req_len))
       {
         ArmCommandOutIfIdle();
         return;
@@ -277,16 +279,22 @@ class WchLinkRvClass : public DeviceClass
     ArmCommandOutIfIdle();
   }
 
-  void OnDataOut(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
+  void OnDataOut(bool /*in_isr*/, LibXR::ConstRawData& data)
   {
-    if (flash_write_stream_enabled_)
+    const uint32_t rx_bytes = static_cast<uint32_t>(data.size_);
+    if (program_mode_ == ProgramMode::WRITE_FLASH_OP)
     {
-      (void)TrySendDataAck();
+      flash_op_rx_bytes_ += rx_bytes;
     }
+    else if (program_mode_ == ProgramMode::WRITE_FLASH_STREAM)
+    {
+      ProcessFlashStreamBytes(rx_bytes);
+    }
+    FlushPendingDataAck();
     ArmDataOutIfIdle();
   }
 
-  void OnDataIn(bool /*in_isr*/, LibXR::ConstRawData& /*data*/) {}
+  void OnDataIn(bool /*in_isr*/, LibXR::ConstRawData& /*data*/) { FlushPendingDataAck(); }
 
   void ResetRuntimeModel()
   {
@@ -297,6 +305,14 @@ class WchLinkRvClass : public DeviceClass
     read_region_addr_ = 0u;
     read_region_len_ = 0u;
     current_sdi_clock_hz_ = kSdiClockHzHigh;
+    program_mode_ = ProgramMode::IDLE;
+    flash_op_ready_ = false;
+    flash_op_rx_bytes_ = 0u;
+    flash_stream_chunk_bytes_ = kDefaultWritePackSize;
+    flash_stream_total_raw_bytes_ = 0u;
+    flash_stream_rx_bytes_ = 0u;
+    flash_stream_next_ack_at_ = 0u;
+    pending_data_ack_ = 0u;
   }
 
   static uint32_t LoadBe32(const uint8_t* p)
@@ -326,6 +342,20 @@ class WchLinkRvClass : public DeviceClass
         return kSdiClockHzHigh;
     }
   }
+
+  static uint32_t DecodeWritePackBytes(uint8_t chip_family)
+  {
+    switch (chip_family)
+    {
+      case 0x09u:
+      case 0x0Au:
+        return 1024u;
+      default:
+        return kDefaultWritePackSize;
+    }
+  }
+
+  static uint32_t MinU32(uint32_t a, uint32_t b) { return (a < b) ? a : b; }
 
   static uint8_t AckToDmiOp(LibXR::Debug::Sdi::Ack ack)
   {
@@ -403,6 +433,95 @@ class WchLinkRvClass : public DeviceClass
   static bool IsDmRunning(uint32_t dmstatus)
   {
     return (dmstatus & (1u << 11u)) != 0u && (dmstatus & (1u << 10u)) != 0u;
+  }
+
+  uint8_t ActiveChipFamily() const
+  {
+    if (requested_chip_family_ != 0u)
+    {
+      return requested_chip_family_;
+    }
+    return probe_id_.chip_family;
+  }
+
+  void QueueDataAck(uint8_t count = 1u)
+  {
+    if (count == 0u)
+    {
+      return;
+    }
+    const uint16_t next = static_cast<uint16_t>(pending_data_ack_) + static_cast<uint16_t>(count);
+    pending_data_ack_ = (next > 0xFFu) ? 0xFFu : static_cast<uint8_t>(next);
+  }
+
+  void FlushPendingDataAck()
+  {
+    if (pending_data_ack_ == 0u)
+    {
+      return;
+    }
+    if (TrySendDataAck())
+    {
+      --pending_data_ack_;
+    }
+  }
+
+  void EnterFlashOpStream()
+  {
+    program_mode_ = ProgramMode::WRITE_FLASH_OP;
+    flash_op_rx_bytes_ = 0u;
+    flash_op_ready_ = false;
+  }
+
+  void ExitProgramStream()
+  {
+    program_mode_ = ProgramMode::IDLE;
+    flash_write_stream_enabled_ = false;
+    flash_stream_total_raw_bytes_ = 0u;
+    flash_stream_rx_bytes_ = 0u;
+    flash_stream_next_ack_at_ = 0u;
+    pending_data_ack_ = 0u;
+  }
+
+  bool EnterFlashWriteStream()
+  {
+    flash_stream_total_raw_bytes_ = write_region_len_;
+    if (flash_stream_total_raw_bytes_ == 0u)
+    {
+      return false;
+    }
+
+    const uint32_t chunk = DecodeWritePackBytes(ActiveChipFamily());
+    flash_stream_chunk_bytes_ = (chunk == 0u) ? kDefaultWritePackSize : chunk;
+    flash_stream_rx_bytes_ = 0u;
+    flash_stream_next_ack_at_ = MinU32(flash_stream_chunk_bytes_, flash_stream_total_raw_bytes_);
+    pending_data_ack_ = 0u;
+    flash_write_stream_enabled_ = true;
+    program_mode_ = ProgramMode::WRITE_FLASH_STREAM;
+    return true;
+  }
+
+  void ProcessFlashStreamBytes(uint32_t rx_bytes)
+  {
+    if (rx_bytes == 0u || flash_stream_next_ack_at_ == 0u)
+    {
+      return;
+    }
+
+    flash_stream_rx_bytes_ += rx_bytes;
+
+    while (flash_stream_rx_bytes_ >= flash_stream_next_ack_at_)
+    {
+      QueueDataAck();
+      if (flash_stream_next_ack_at_ >= flash_stream_total_raw_bytes_)
+      {
+        flash_stream_next_ack_at_ = 0u;
+        break;
+      }
+
+      const uint32_t remain = flash_stream_total_raw_bytes_ - flash_stream_next_ack_at_;
+      flash_stream_next_ack_at_ += MinU32(flash_stream_chunk_bytes_, remain);
+    }
   }
 
   bool DmiReadWord(uint8_t addr, uint32_t& data)
@@ -661,8 +780,9 @@ class WchLinkRvClass : public DeviceClass
     if (sub == 0xFFu)
     {
       attached_ = false;
-      flash_write_stream_enabled_ = false;
+      ExitProgramStream();
       sdi_.Close();
+      session_started_ = false;
       const uint8_t done[1] = {0xFFu};
       return BuildStandardResponse(0x0Du, done, sizeof(done), resp, cap, out_len);
     }
@@ -758,13 +878,25 @@ class WchLinkRvClass : public DeviceClass
     }
 
     const uint8_t sub = payload[0];
-    if (sub == 0x02u)
+    if (sub == 0x05u)
     {
-      flash_write_stream_enabled_ = true;
+      EnterFlashOpStream();
     }
-    else if (sub == 0x08u || sub == 0x09u)
+    else if (sub == 0x07u || sub == 0x0Bu)
     {
-      flash_write_stream_enabled_ = false;
+      flash_op_ready_ = (flash_op_rx_bytes_ > 0u);
+      program_mode_ = ProgramMode::IDLE;
+    }
+    else if (sub == 0x02u || sub == 0x04u)
+    {
+      if (!EnterFlashWriteStream())
+      {
+        return BuildErrorResponse(0x55u, resp, cap, out_len);
+      }
+    }
+    else if (sub == 0x08u || sub == 0x09u || sub == 0x01u)
+    {
+      ExitProgramStream();
     }
 
     return BuildStandardResponse(0x02u, &sub, 1u, resp, cap, out_len);
@@ -939,6 +1071,7 @@ class WchLinkRvClass : public DeviceClass
   static constexpr uint16_t CMD_PACKET_SIZE = 64u;
   static constexpr uint16_t DATA_PACKET_SIZE = 64u;
   static constexpr std::array<uint8_t, 4> DATA_ACK_FRAME = {0x41u, 0x01u, 0x01u, 0x04u};
+  static constexpr uint32_t kDefaultWritePackSize = 4096u;
   static constexpr uint32_t kSdiClockHzLow = 400'000u;
   static constexpr uint32_t kSdiClockHzMedium = 4'000'000u;
   static constexpr uint32_t kSdiClockHzHigh = 6'000'000u;
@@ -958,6 +1091,12 @@ class WchLinkRvClass : public DeviceClass
   {
     return req != nullptr && req_len >= 4u && req[0] == 0x81u && req[1] == 0x0Du &&
            req[2] == 0x01u && req[3] == 0x01u;
+  }
+
+  static bool IsAttachChipRequest(const uint8_t* req, uint16_t req_len)
+  {
+    return req != nullptr && req_len >= 4u && req[0] == 0x81u && req[1] == 0x0Du &&
+           req[2] == 0x01u && req[3] == 0x02u;
   }
 
 #pragma pack(push, 1)
@@ -990,6 +1129,13 @@ class WchLinkRvClass : public DeviceClass
   bool attached_ = false;
   bool flash_write_stream_enabled_ = false;
 
+  enum class ProgramMode : uint8_t
+  {
+    IDLE = 0u,
+    WRITE_FLASH_OP,
+    WRITE_FLASH_STREAM,
+  };
+
   uint32_t write_region_addr_ = 0u;
   uint32_t write_region_len_ = 0u;
   uint32_t read_region_addr_ = 0u;
@@ -1000,6 +1146,14 @@ class WchLinkRvClass : public DeviceClass
   uint32_t esig_uid_word1_ = 0u;
   uint32_t esig_reserved_word_ = 0xFFFFFFFFu;
   uint8_t requested_chip_family_ = 0u;
+  ProgramMode program_mode_ = ProgramMode::IDLE;
+  bool flash_op_ready_ = false;
+  uint32_t flash_op_rx_bytes_ = 0u;
+  uint32_t flash_stream_chunk_bytes_ = kDefaultWritePackSize;
+  uint32_t flash_stream_total_raw_bytes_ = 0u;
+  uint32_t flash_stream_rx_bytes_ = 0u;
+  uint32_t flash_stream_next_ack_at_ = 0u;
+  uint8_t pending_data_ack_ = 0u;
 
   std::array<uint8_t, 96> pending_cmd_buf_ = {};
   uint16_t pending_cmd_len_ = 0u;
