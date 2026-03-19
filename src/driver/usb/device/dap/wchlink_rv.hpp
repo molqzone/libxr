@@ -226,6 +226,7 @@ class WchLinkRvClass : public DeviceClass
         ArmCommandOutIfIdle();
         return;
       }
+      PrepareFreshSessionStart();
       session_started_ = true;
     }
 
@@ -295,6 +296,34 @@ class WchLinkRvClass : public DeviceClass
   }
 
   void OnDataIn(bool /*in_isr*/, LibXR::ConstRawData& /*data*/) { FlushPendingDataAck(); }
+
+  void ReopenBulkInEndpoint(Endpoint* ep, uint16_t mps,
+                            const LibXR::Callback<LibXR::ConstRawData&>& cb)
+  {
+    if (!ep)
+    {
+      return;
+    }
+    ep->Close();
+    ep->SetActiveLength(0u);
+    ep->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, mps, false});
+    ep->SetOnTransferCompleteCallback(cb);
+  }
+
+  void PrepareFreshSessionStart()
+  {
+    // Host reconnection may leave unread/stale IN payload in previous session.
+    // Reset software queue and reopen IN endpoints to guarantee the new session
+    // starts from GetProbeInfo/Attach on a clean command/data plane.
+    pending_cmd_valid_ = false;
+    pending_cmd_len_ = 0u;
+    attached_ = false;
+    ExitProgramStream();
+    sdi_.Close();
+
+    ReopenBulkInEndpoint(ep_cmd_in_, CMD_PACKET_SIZE, on_cmd_in_cb_);
+    ReopenBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
+  }
 
   void ResetRuntimeModel()
   {
