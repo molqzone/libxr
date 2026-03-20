@@ -212,8 +212,22 @@ class WchLinkRvClass : public DeviceClass
 
   void OnCommandOut(bool /*in_isr*/, LibXR::ConstRawData& data)
   {
-    const auto* req = static_cast<const uint8_t*>(data.addr_);
-    const uint16_t req_len = static_cast<uint16_t>(data.size_);
+    TryFinalizeDataInRecovery();
+
+    const auto* req_raw = static_cast<const uint8_t*>(data.addr_);
+    const uint16_t req_raw_len = static_cast<uint16_t>(data.size_);
+    if (!req_raw || req_raw_len == 0u)
+    {
+      ArmCommandOutIfIdle();
+      return;
+    }
+
+    const uint16_t req_len =
+        (req_raw_len <= CMD_PACKET_SIZE) ? req_raw_len : static_cast<uint16_t>(CMD_PACKET_SIZE);
+    std::array<uint8_t, CMD_PACKET_SIZE> req_shadow = {};
+    std::memcpy(req_shadow.data(), req_raw, req_len);
+    const auto* req = req_shadow.data();
+
     const bool start_with_probe_info = IsGetProbeInfoRequest(req, req_len);
     const bool start_with_attach = IsAttachChipRequest(req, req_len);
 
@@ -236,64 +250,265 @@ class WchLinkRvClass : public DeviceClass
     }
     else if (!session_started_)
     {
+      // Keep dropping stale pre-session frames until host starts with
+      // GetProbeInfo/Attach. This avoids injecting unexpected error frames into
+      // host reconnect sequences.
       ArmCommandOutIfIdle();
       return;
     }
 
+    std::array<uint8_t, CMD_PACKET_SIZE> resp_shadow = {};
     uint16_t out_len = 0u;
-    auto tx = ep_cmd_in_ ? ep_cmd_in_->GetBuffer() : RawData{nullptr, 0};
-    if (!tx.addr_ || tx.size_ == 0u)
+    (void)HandleCommand(req, req_len, resp_shadow.data(), static_cast<uint16_t>(resp_shadow.size()),
+                        out_len);
+    QueueCommandResponse(resp_shadow.data(), out_len);
+  }
+
+  void QueueCommandResponse(const uint8_t* resp, uint16_t out_len)
+  {
+    if (!resp || out_len == 0u)
     {
+      // Avoid silent no-response path: return explicit protocol error when the
+      // command handler produced an empty payload.
+      if (TryStartProtocolErrorCommandIn(0x55u))
+      {
+        pending_cmd_overflow_count_ = 0u;
+        return;
+      }
+      QueueCommandOverflowError();
       ArmCommandOutIfIdle();
       return;
     }
 
-    auto* resp = static_cast<uint8_t*>(tx.addr_);
-
-    (void)HandleCommand(req, req_len, resp, static_cast<uint16_t>(tx.size_), out_len);
-    if (!TryStartCommandIn(out_len))
+    if (TryStartCommandInPayloadWithRecovery(resp, out_len))
     {
-      if (out_len <= pending_cmd_buf_.size())
-      {
-        std::memcpy(pending_cmd_buf_.data(), resp, out_len);
-        pending_cmd_len_ = out_len;
-        pending_cmd_valid_ = true;
-      }
+      // Do not inject delayed historical overflow errors after a successful
+      // command response, to keep host request/response pairing stable.
+      pending_cmd_overflow_count_ = 0u;
+      return;
     }
+
+    if (ep_cmd_in_ && ep_cmd_in_->GetState() == Endpoint::State::BUSY &&
+        !pending_cmd_valid_ && out_len <= pending_cmd_buf_.size())
+    {
+      std::memcpy(pending_cmd_buf_.data(), resp, out_len);
+      pending_cmd_len_ = out_len;
+      pending_cmd_valid_ = true;
+      return;
+    }
+
+    // Queue is already occupied or payload does not fit software backup
+    // buffer. Defer an explicit protocol error frame to avoid silent drop.
+    if (TryStartProtocolErrorCommandIn(0x55u))
+    {
+      return;
+    }
+    QueueCommandOverflowError();
+    ArmCommandOutIfIdle();
+  }
+
+  void ResetBulkInEndpoint(Endpoint* ep_in, uint16_t packet_size,
+                           const LibXR::Callback<LibXR::ConstRawData&>& in_cb)
+  {
+    if (!ep_in)
+    {
+      return;
+    }
+
+    ep_in->Close();
+    ep_in->SetActiveLength(0u);
+    ep_in->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, packet_size, false});
+    ep_in->SetOnTransferCompleteCallback(in_cb);
+  }
+
+  void ResetBulkInAndRestoreOut(Endpoint* ep_out, Endpoint* ep_in, uint16_t packet_size,
+                                const LibXR::Callback<LibXR::ConstRawData&>& out_cb,
+                                const LibXR::Callback<LibXR::ConstRawData&>& in_cb)
+  {
+    if (!ep_out || !ep_in)
+    {
+      return;
+    }
+
+    // Keep OUT endpoint object alive and reconfigure it after IN close, because
+    // some backends disable both directions when IN is closed.
+    ResetBulkInEndpoint(ep_in, packet_size, in_cb);
+    ep_out->SetActiveLength(0u);
+    ep_out->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK, packet_size, false});
+    ep_out->SetOnTransferCompleteCallback(out_cb);
+  }
+
+  void ResetCommandPlaneEndpoints(bool arm_out = true)
+  {
+    ResetBulkInAndRestoreOut(ep_cmd_out_, ep_cmd_in_, CMD_PACKET_SIZE, on_cmd_out_cb_, on_cmd_in_cb_);
+    if (arm_out)
+    {
+      ArmCommandOutIfIdle();
+    }
+  }
+
+  void ResetDataPlaneEndpoints(bool arm_out = true)
+  {
+    ResetBulkInAndRestoreOut(ep_data_out_, ep_data_in_, DATA_PACKET_SIZE, on_data_out_cb_, on_data_in_cb_);
+    if (arm_out)
+    {
+      ArmDataOutIfIdle();
+    }
+  }
+
+  void ResetDataInEndpoint()
+  {
+    data_ack_in_flight_ = false;
+    ResetBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
+    ArmDataOutIfIdle();
+  }
+
+  void ResetCommandInEndpoint()
+  {
+    ResetBulkInEndpoint(ep_cmd_in_, CMD_PACKET_SIZE, on_cmd_in_cb_);
+  }
+
+  bool TryStartCommandInPayloadWithRecovery(const uint8_t* payload, uint16_t len)
+  {
+    if (!payload || len == 0u || !ep_cmd_in_)
+    {
+      return false;
+    }
+
+    auto try_start_once = [&]() -> bool
+    {
+      if (!ep_cmd_in_ || ep_cmd_in_->GetState() != Endpoint::State::IDLE)
+      {
+        return false;
+      }
+      auto tx = ep_cmd_in_->GetBuffer();
+      if (!tx.addr_ || tx.size_ < len)
+      {
+        return false;
+      }
+      std::memcpy(tx.addr_, payload, len);
+      return ep_cmd_in_->Transfer(len) == ErrorCode::OK;
+    };
+
+    if (try_start_once())
+    {
+      return true;
+    }
+
+    // Busy is handled by normal completion callback retry path.
+    if (!ep_cmd_in_ || ep_cmd_in_->GetState() == Endpoint::State::BUSY)
+    {
+      return false;
+    }
+
+    // Hard failure while not busy: recover command IN only. Avoid touching
+    // OUT here because OUT may already have an in-flight host transfer.
+    ResetCommandInEndpoint();
+    return try_start_once();
+  }
+
+  bool TryStartProtocolErrorCommandIn(uint8_t reason)
+  {
+    uint8_t err[3] = {};
+    uint16_t out_len = 0u;
+    if (BuildErrorResponse(reason, err, static_cast<uint16_t>(sizeof(err)), out_len) != ErrorCode::OK)
+    {
+      return false;
+    }
+    return TryStartCommandInPayloadWithRecovery(err, out_len);
+  }
+
+  void ScheduleDataInRecovery()
+  {
+    data_in_recovery_pending_ = true;
+    data_in_recovery_spins_ = 0u;
+  }
+
+  void TryFinalizeDataInRecovery()
+  {
+    if (!data_in_recovery_pending_)
+    {
+      return;
+    }
+
+    if (!IsDataInBusy())
+    {
+      data_in_recovery_pending_ = false;
+      data_in_recovery_spins_ = 0u;
+      read_stream_fault_pending_finalize_ = false;
+      ResetDataInEndpoint();
+      return;
+    }
+
+    if (data_in_recovery_spins_ < kDataInRecoveryForceAfterSpins)
+    {
+      ++data_in_recovery_spins_;
+      return;
+    }
+
+    // Recovery deadline reached: force-close EP2 IN to break a stuck BUSY
+    // state and avoid indefinite ACK/data plane starvation.
+    data_in_recovery_pending_ = false;
+    data_in_recovery_spins_ = 0u;
+    read_stream_fault_pending_finalize_ = false;
+    ResetDataInEndpoint();
   }
 
   void OnCommandIn(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
   {
+    TryFinalizeDataInRecovery();
+
     if (!pending_cmd_valid_)
     {
+      if (pending_cmd_overflow_count_ != 0u)
+      {
+        if (TryStartProtocolErrorCommandIn(0x55u))
+        {
+          --pending_cmd_overflow_count_;
+          return;
+        }
+        ArmCommandOutIfIdle();
+        return;
+      }
       PumpReadStreamIfIdle();
       ArmCommandOutIfIdle();
       return;
     }
 
-    auto tx = ep_cmd_in_ ? ep_cmd_in_->GetBuffer() : RawData{nullptr, 0};
-    if (!tx.addr_ || tx.size_ < pending_cmd_len_)
+    if (TryStartCommandInPayloadWithRecovery(pending_cmd_buf_.data(), pending_cmd_len_))
     {
       pending_cmd_valid_ = false;
       pending_cmd_len_ = 0u;
-      PumpReadStreamIfIdle();
-      ArmCommandOutIfIdle();
+      pending_cmd_overflow_count_ = 0u;
       return;
     }
 
-    std::memcpy(tx.addr_, pending_cmd_buf_.data(), pending_cmd_len_);
-    if (TryStartCommandIn(pending_cmd_len_))
+    // Do bounded in-callback retries before dropping the pending response.
+    for (uint8_t i = 0u; i < kPendingCmdSendRetryLimit; ++i)
     {
-      pending_cmd_valid_ = false;
-      pending_cmd_len_ = 0u;
-      return;
+      if (TryStartCommandInPayloadWithRecovery(pending_cmd_buf_.data(), pending_cmd_len_))
+      {
+        pending_cmd_valid_ = false;
+        pending_cmd_len_ = 0u;
+        pending_cmd_overflow_count_ = 0u;
+        return;
+      }
     }
 
+    pending_cmd_valid_ = false;
+    pending_cmd_len_ = 0u;
+    if (TryStartProtocolErrorCommandIn(0x55u))
+    {
+      return;
+    }
+    QueueCommandOverflowError();
     ArmCommandOutIfIdle();
   }
 
   void OnDataOut(bool /*in_isr*/, LibXR::ConstRawData& data)
   {
+    TryFinalizeDataInRecovery();
+
     const auto* rx = static_cast<const uint8_t*>(data.addr_);
     const uint32_t rx_bytes = static_cast<uint32_t>(data.size_);
     if (program_mode_ == ProgramMode::WRITE_FLASH_OP)
@@ -310,12 +525,16 @@ class WchLinkRvClass : public DeviceClass
 
   void OnDataIn(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
   {
-    if (read_stream_fault_pending_finalize_)
+    TryFinalizeDataInRecovery();
+    if (data_ack_in_flight_)
     {
-      read_stream_fault_pending_finalize_ = false;
-      // Defer EP2 IN reopen until the last queued IN transfer has completed.
-      ReopenBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
+      data_ack_in_flight_ = false;
+      if (pending_data_ack_ > 0u)
+      {
+        --pending_data_ack_;
+      }
     }
+
     if (read_stream_active_)
     {
       PumpReadStreamIfIdle();
@@ -324,26 +543,14 @@ class WchLinkRvClass : public DeviceClass
     FlushPendingDataAck();
   }
 
-  void ReopenBulkInEndpoint(Endpoint* ep, uint16_t mps,
-                            const LibXR::Callback<LibXR::ConstRawData&>& cb)
-  {
-    if (!ep)
-    {
-      return;
-    }
-    ep->Close();
-    ep->SetActiveLength(0u);
-    ep->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, mps, false});
-    ep->SetOnTransferCompleteCallback(cb);
-  }
-
   void PrepareFreshSessionStart(bool clear_host_selected_chip)
   {
     // Host reconnection may leave unread/stale IN payload in previous session.
-    // Reset software queue and reopen IN endpoints to guarantee the new session
-    // starts from GetProbeInfo/Attach on a clean command/data plane.
+    // Reset software queue and model state to guarantee the new session starts
+    // from GetProbeInfo/Attach on a clean command/data plane.
     pending_cmd_valid_ = false;
     pending_cmd_len_ = 0u;
+    pending_cmd_overflow_count_ = 0u;
     attached_ = false;
     read_stream_fault_latched_ = false;
     read_stream_fault_pending_finalize_ = false;
@@ -355,8 +562,23 @@ class WchLinkRvClass : public DeviceClass
     ExitReadStream();
     sdi_.Close();
 
-    ReopenBulkInEndpoint(ep_cmd_in_, CMD_PACKET_SIZE, on_cmd_in_cb_);
-    ReopenBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
+    // Do not re-arm EP1 OUT here: we are still handling the current command
+    // in OnCommandOut. Re-arming too early can allow command overlap on single
+    // EP1 IN buffer and corrupt in-flight responses.
+    ResetCommandPlaneEndpoints(false);
+
+    // Avoid aggressive EP2 OUT reconfigure in command callback. Recover EP2 IN
+    // only and keep OUT side naturally drained/armed.
+    if (IsDataInBusy())
+    {
+      ScheduleDataInRecovery();
+    }
+    else
+    {
+      data_in_recovery_pending_ = false;
+      data_in_recovery_spins_ = 0u;
+      ResetDataInEndpoint();
+    }
   }
 
   void ResetRuntimeModel()
@@ -378,9 +600,13 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_write_addr_ = 0u;
     flash_stream_error_ = false;
     pending_data_ack_ = 0u;
+    data_ack_in_flight_ = false;
+    pending_cmd_overflow_count_ = 0u;
     read_stream_active_ = false;
     read_stream_fault_latched_ = false;
     read_stream_fault_pending_finalize_ = false;
+    data_in_recovery_pending_ = false;
+    data_in_recovery_spins_ = 0u;
     read_stream_addr_ = 0u;
     read_stream_remaining_ = 0u;
     read_stream_error_ = false;
@@ -572,18 +798,28 @@ class WchLinkRvClass : public DeviceClass
     chip_family_selected_for_next_attach_ = false;
   }
 
-  void HandleReadStreamLinkFault(bool defer_data_in_reopen = false)
+  bool IsDataInBusy() const
+  {
+    return ep_data_in_ != nullptr && ep_data_in_->GetState() == Endpoint::State::BUSY;
+  }
+
+  void HandleReadStreamLinkFault(bool defer_data_in_finalize = false)
   {
     read_stream_active_ = false;
     attached_ = false;
     read_stream_fault_latched_ = true;
-    read_stream_fault_pending_finalize_ = defer_data_in_reopen;
-    sdi_.Close();
-    if (!defer_data_in_reopen)
+    const bool need_defer = defer_data_in_finalize || IsDataInBusy();
+    read_stream_fault_pending_finalize_ = need_defer;
+    if (need_defer)
     {
-      // Force EP2 IN back to IDLE so later flash ACK frames cannot be blocked
-      // by a stale/busy read stream endpoint state.
-      ReopenBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
+      ScheduleDataInRecovery();
+    }
+    sdi_.Close();
+    if (!need_defer)
+    {
+      data_in_recovery_pending_ = false;
+      data_in_recovery_spins_ = 0u;
+      ResetDataInEndpoint();
     }
   }
 
@@ -599,22 +835,17 @@ class WchLinkRvClass : public DeviceClass
 
   void FlushPendingDataAck()
   {
-    if (pending_data_ack_ == 0u)
+    if (pending_data_ack_ == 0u || data_ack_in_flight_)
     {
       return;
     }
-    if (TrySendDataAck())
-    {
-      --pending_data_ack_;
-    }
+    (void)TrySendDataAck();
   }
 
   void EnterFlashOpStream()
   {
     ExitReadStream();
-    // Entering flash-op/write path should always recover EP2 IN from a
-    // potentially abandoned read stream.
-    ReopenBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
+    ResetDataInEndpoint();
     program_mode_ = ProgramMode::WRITE_FLASH_OP;
     flash_op_rx_bytes_ = 0u;
     flash_op_ready_ = false;
@@ -624,6 +855,7 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_write_addr_ = 0u;
     flash_stream_error_ = false;
     pending_data_ack_ = 0u;
+    data_ack_in_flight_ = false;
   }
 
   void ExitProgramStream()
@@ -637,6 +869,7 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_write_addr_ = 0u;
     flash_stream_error_ = false;
     pending_data_ack_ = 0u;
+    data_ack_in_flight_ = false;
   }
 
   bool EnterFlashWriteStream()
@@ -661,6 +894,19 @@ class WchLinkRvClass : public DeviceClass
     pending_data_ack_ = 0u;
     program_mode_ = ProgramMode::WRITE_FLASH_STREAM;
     return true;
+  }
+
+  uint8_t PendingDataAckBacklog() const
+  {
+    if (pending_data_ack_ == 0u)
+    {
+      return 0u;
+    }
+    if (data_ack_in_flight_ && pending_data_ack_ > 0u)
+    {
+      return static_cast<uint8_t>(pending_data_ack_ - 1u);
+    }
+    return pending_data_ack_;
   }
 
   void ProcessFlashStreamData(const uint8_t* data, uint32_t rx_bytes)
@@ -1160,14 +1406,12 @@ class WchLinkRvClass : public DeviceClass
 
       uint32_t chip_id = probe_id_.chip_id;
       uint8_t chip_family = (requested_chip_family_ != 0u) ? requested_chip_family_ : probe_id_.chip_family;
-      if (!TryProbeChipIdentity(chip_id, chip_family))
+      if (!TryProbeChipIdentity(chip_id, chip_family) &&
+          !TryProbeChipIdentity(chip_id, chip_family))
       {
+        // Keep attach compatibility with hosts that continue with chip-id
+        // fallback when probe-id read fails.
         chip_id = 0u;
-      }
-      else
-      {
-        probe_id_.chip_id = chip_id;
-        probe_id_.chip_family = chip_family;
       }
       probe_id_.chip_id = chip_id;
       if (chip_family != 0u)
@@ -1195,6 +1439,7 @@ class WchLinkRvClass : public DeviceClass
       sdi_.Close();
       read_stream_fault_latched_ = false;
       ClearHostSelectedChipFamily();
+      pending_cmd_overflow_count_ = 0u;
       session_started_ = false;
       const uint8_t done[1] = {0xFFu};
       return BuildStandardResponse(0x0Du, done, sizeof(done), resp, cap, out_len);
@@ -1325,7 +1570,7 @@ class WchLinkRvClass : public DeviceClass
       FlushPendingDataAck();
       // Program End must arrive after the full write-region payload is streamed.
       if (program_mode_ != ProgramMode::WRITE_FLASH_STREAM || !IsFlashWriteFinished() ||
-          pending_data_ack_ != 0u || flash_stream_error_)
+          PendingDataAckBacklog() != 0u || flash_stream_error_)
       {
         return BuildErrorResponse(0x55u, resp, cap, out_len);
       }
@@ -1481,6 +1726,10 @@ class WchLinkRvClass : public DeviceClass
     {
       return false;
     }
+    if (data_ack_in_flight_)
+    {
+      return false;
+    }
     if (ep_data_in_->GetState() != Endpoint::State::IDLE)
     {
       return false;
@@ -1493,7 +1742,23 @@ class WchLinkRvClass : public DeviceClass
     }
 
     std::memcpy(tx.addr_, DATA_ACK_FRAME.data(), DATA_ACK_FRAME.size());
-    return ep_data_in_->Transfer(DATA_ACK_FRAME.size()) == ErrorCode::OK;
+    if (ep_data_in_->Transfer(DATA_ACK_FRAME.size()) != ErrorCode::OK)
+    {
+      return false;
+    }
+    data_ack_in_flight_ = true;
+    return true;
+  }
+
+  void QueueCommandOverflowError(uint8_t count = 1u)
+  {
+    if (count == 0u)
+    {
+      return;
+    }
+    const uint16_t next =
+        static_cast<uint16_t>(pending_cmd_overflow_count_) + static_cast<uint16_t>(count);
+    pending_cmd_overflow_count_ = (next > 0xFFu) ? 0xFFu : static_cast<uint8_t>(next);
   }
 
   void ArmCommandOutIfIdle()
@@ -1539,6 +1804,8 @@ class WchLinkRvClass : public DeviceClass
  private:
   static constexpr uint16_t CMD_PACKET_SIZE = 64u;
   static constexpr uint16_t DATA_PACKET_SIZE = 64u;
+  static constexpr uint8_t kDataInRecoveryForceAfterSpins = 16u;
+  static constexpr uint8_t kPendingCmdSendRetryLimit = 2u;
   static constexpr std::array<uint8_t, 4> DATA_ACK_FRAME = {0x41u, 0x01u, 0x01u, 0x04u};
   static constexpr uint32_t kDefaultWritePackSize = 4096u;
   static constexpr uint32_t kSdiClockHzLow = 400'000u;
@@ -1626,6 +1893,7 @@ class WchLinkRvClass : public DeviceClass
   uint32_t flash_stream_write_addr_ = 0u;
   bool flash_stream_error_ = false;
   uint8_t pending_data_ack_ = 0u;
+  bool data_ack_in_flight_ = false;
   bool read_stream_active_ = false;
   bool read_stream_fault_latched_ = false;
   bool read_stream_fault_pending_finalize_ = false;
@@ -1636,7 +1904,10 @@ class WchLinkRvClass : public DeviceClass
   std::array<uint8_t, 96> pending_cmd_buf_ = {};
   uint16_t pending_cmd_len_ = 0u;
   bool pending_cmd_valid_ = false;
+  uint8_t pending_cmd_overflow_count_ = 0u;
   bool session_started_ = false;
+  bool data_in_recovery_pending_ = false;
+  uint8_t data_in_recovery_spins_ = 0u;
 
   LibXR::Callback<LibXR::ConstRawData&> on_cmd_out_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnCommandOutStatic, this);
