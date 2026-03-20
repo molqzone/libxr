@@ -310,6 +310,12 @@ class WchLinkRvClass : public DeviceClass
 
   void OnDataIn(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
   {
+    if (read_stream_fault_pending_finalize_)
+    {
+      read_stream_fault_pending_finalize_ = false;
+      // Defer EP2 IN reopen until the last queued IN transfer has completed.
+      ReopenBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
+    }
     if (read_stream_active_)
     {
       PumpReadStreamIfIdle();
@@ -339,6 +345,8 @@ class WchLinkRvClass : public DeviceClass
     pending_cmd_valid_ = false;
     pending_cmd_len_ = 0u;
     attached_ = false;
+    read_stream_fault_latched_ = false;
+    read_stream_fault_pending_finalize_ = false;
     if (clear_host_selected_chip)
     {
       ClearHostSelectedChipFamily();
@@ -371,6 +379,8 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_error_ = false;
     pending_data_ack_ = 0u;
     read_stream_active_ = false;
+    read_stream_fault_latched_ = false;
+    read_stream_fault_pending_finalize_ = false;
     read_stream_addr_ = 0u;
     read_stream_remaining_ = 0u;
     read_stream_error_ = false;
@@ -562,6 +572,21 @@ class WchLinkRvClass : public DeviceClass
     chip_family_selected_for_next_attach_ = false;
   }
 
+  void HandleReadStreamLinkFault(bool defer_data_in_reopen = false)
+  {
+    read_stream_active_ = false;
+    attached_ = false;
+    read_stream_fault_latched_ = true;
+    read_stream_fault_pending_finalize_ = defer_data_in_reopen;
+    sdi_.Close();
+    if (!defer_data_in_reopen)
+    {
+      // Force EP2 IN back to IDLE so later flash ACK frames cannot be blocked
+      // by a stale/busy read stream endpoint state.
+      ReopenBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
+    }
+  }
+
   void QueueDataAck(uint8_t count = 1u)
   {
     if (count == 0u)
@@ -587,6 +612,9 @@ class WchLinkRvClass : public DeviceClass
   void EnterFlashOpStream()
   {
     ExitReadStream();
+    // Entering flash-op/write path should always recover EP2 IN from a
+    // potentially abandoned read stream.
+    ReopenBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
     program_mode_ = ProgramMode::WRITE_FLASH_OP;
     flash_op_rx_bytes_ = 0u;
     flash_op_ready_ = false;
@@ -715,6 +743,8 @@ class WchLinkRvClass : public DeviceClass
   {
     ExitProgramStream();
     read_stream_active_ = true;
+    read_stream_fault_latched_ = false;
+    read_stream_fault_pending_finalize_ = false;
     read_stream_addr_ = addr;
     read_stream_remaining_ = len;
     read_stream_error_ = false;
@@ -757,10 +787,7 @@ class WchLinkRvClass : public DeviceClass
     if (!tx.addr_ || tx.size_ == 0u)
     {
       read_stream_error_ = true;
-      read_stream_active_ = false;
-      attached_ = false;
-      ClearHostSelectedChipFamily();
-      sdi_.Close();
+      HandleReadStreamLinkFault();
       return false;
     }
 
@@ -771,13 +798,20 @@ class WchLinkRvClass : public DeviceClass
     uint32_t filled = 0u;
     while (filled < chunk_bytes)
     {
-      uint32_t word = 0u;
-      if (!read_stream_error_ && !TryReadTargetWordByAbstract(read_stream_addr_, word))
+      uint32_t word = 0xFFFFFFFFu;
+      if (!read_stream_error_)
       {
-        // Keep the EP2 stream progressing to avoid host-side blocking on
-        // partial reads after a mid-stream SDI failure.
-        read_stream_error_ = true;
-        word = 0xFFFFFFFFu;
+        uint32_t read_word = 0u;
+        if (!TryReadTargetWordByAbstract(read_stream_addr_, read_word))
+        {
+          // Keep the EP2 stream progressing to avoid host-side blocking on
+          // partial reads after a mid-stream SDI failure.
+          read_stream_error_ = true;
+        }
+        else
+        {
+          word = read_word;
+        }
       }
 
       const uint32_t remain = chunk_bytes - filled;
@@ -794,10 +828,7 @@ class WchLinkRvClass : public DeviceClass
     if (ep_data_in_->Transfer(static_cast<uint16_t>(chunk_bytes)) != ErrorCode::OK)
     {
       read_stream_error_ = true;
-      read_stream_active_ = false;
-      attached_ = false;
-      ClearHostSelectedChipFamily();
-      sdi_.Close();
+      HandleReadStreamLinkFault();
       return false;
     }
     if (read_stream_remaining_ == 0u)
@@ -805,9 +836,9 @@ class WchLinkRvClass : public DeviceClass
       read_stream_active_ = false;
       if (read_stream_error_)
       {
-        attached_ = false;
-        ClearHostSelectedChipFamily();
-        sdi_.Close();
+        // The final chunk is already queued on EP2 IN. Defer endpoint reopen
+        // until its completion callback to avoid aborting the in-flight packet.
+        HandleReadStreamLinkFault(true);
       }
     }
     return true;
@@ -1112,7 +1143,6 @@ class WchLinkRvClass : public DeviceClass
     }
     if (sub == 0x02u)
     {
-      chip_family_selected_for_next_attach_ = false;
       attached_ = false;
       const ErrorCode ec = sdi_.EnterSdi();
       if (ec != ErrorCode::OK)
@@ -1145,6 +1175,9 @@ class WchLinkRvClass : public DeviceClass
         probe_id_.chip_family = chip_family;
       }
       attached_ = true;
+      read_stream_fault_latched_ = false;
+      // Consume a host-selected family only after a successful attach.
+      chip_family_selected_for_next_attach_ = false;
 
       const uint8_t attach[5] = {
           probe_id_.chip_family,
@@ -1160,6 +1193,7 @@ class WchLinkRvClass : public DeviceClass
       ExitProgramStream();
       ExitReadStream();
       sdi_.Close();
+      read_stream_fault_latched_ = false;
       ClearHostSelectedChipFamily();
       session_started_ = false;
       const uint8_t done[1] = {0xFFu};
@@ -1213,7 +1247,6 @@ class WchLinkRvClass : public DeviceClass
       if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
       {
         attached_ = false;
-        ClearHostSelectedChipFamily();
         return BuildDmiNotAttachedResponse(resp, cap, out_len);
       }
       out_op = AckToDmiOp(ack);
@@ -1224,7 +1257,6 @@ class WchLinkRvClass : public DeviceClass
       if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
       {
         attached_ = false;
-        ClearHostSelectedChipFamily();
         return BuildDmiNotAttachedResponse(resp, cap, out_len);
       }
       out_data = data;
@@ -1237,7 +1269,6 @@ class WchLinkRvClass : public DeviceClass
       if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
       {
         attached_ = false;
-        ClearHostSelectedChipFamily();
         return BuildDmiNotAttachedResponse(resp, cap, out_len);
       }
       out_data = nop_resp.data;
@@ -1342,6 +1373,25 @@ class WchLinkRvClass : public DeviceClass
 
     const uint8_t* payload = req + 3u;
 
+    if (read_stream_fault_latched_)
+    {
+      const bool allow_control_recovery =
+          cmd == 0x0Du && payload_len >= 1u &&
+          (payload[0] == 0x01u || payload[0] == 0x02u || payload[0] == 0xFFu);
+      const bool allow_set_speed = (cmd == 0x0Cu);
+      // Some host flows issue program-plane cleanup before reattach.
+      const bool allow_program_cleanup =
+          cmd == 0x02u && payload_len >= 1u && (payload[0] == 0x09u || payload[0] == 0x01u);
+      if (!allow_control_recovery && !allow_set_speed && !allow_program_cleanup)
+      {
+        if (cmd == 0x08u)
+        {
+          return BuildDmiNotAttachedResponse(resp, cap, out_len);
+        }
+        return BuildErrorResponse(0x55u, resp, cap, out_len);
+      }
+    }
+
     switch (cmd)
     {
       case 0x0Du:
@@ -1361,10 +1411,6 @@ class WchLinkRvClass : public DeviceClass
           requested_chip_family_ = requested_chip_family;
           chip_family_selected_by_speed_ = (requested_chip_family_ != 0u);
           chip_family_selected_for_next_attach_ = chip_family_selected_by_speed_;
-        }
-        else
-        {
-          ClearHostSelectedChipFamily();
         }
         const uint8_t ok[1] = {static_cast<uint8_t>(success ? 0x01u : 0x00u)};
         return BuildStandardResponse(0x0Cu, ok, sizeof(ok), resp, cap, out_len);
@@ -1581,6 +1627,8 @@ class WchLinkRvClass : public DeviceClass
   bool flash_stream_error_ = false;
   uint8_t pending_data_ack_ = 0u;
   bool read_stream_active_ = false;
+  bool read_stream_fault_latched_ = false;
+  bool read_stream_fault_pending_finalize_ = false;
   uint32_t read_stream_addr_ = 0u;
   uint32_t read_stream_remaining_ = 0u;
   bool read_stream_error_ = false;
