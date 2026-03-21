@@ -10,6 +10,7 @@
 #include "gpio.hpp"
 #include "libxr_def.hpp"
 #include "libxr_type.hpp"
+#include "riscv_dmi_target.hpp"
 #include "usb/core/desc_cfg.hpp"
 
 namespace LibXR::USB
@@ -42,6 +43,7 @@ class WchLinkRvClass : public DeviceClass
       Endpoint::EPNumber command_ep_num = Endpoint::EPNumber::EP1,
       Endpoint::EPNumber data_ep_num = Endpoint::EPNumber::EP2)
       : sdi_(sdi_link),
+        riscv_target_(sdi_),
         nreset_gpio_(nreset_gpio),
         command_ep_num_(command_ep_num),
         data_ep_num_(data_ep_num)
@@ -86,14 +88,19 @@ class WchLinkRvClass : public DeviceClass
     ep_data_out_->SetActiveLength(0u);
     ep_data_in_->SetActiveLength(0u);
 
+    const uint16_t cmd_out_mps = SelectBulkPacketSize(ep_cmd_out_);
+    const uint16_t cmd_in_mps = SelectBulkPacketSize(ep_cmd_in_);
+    const uint16_t data_out_mps = SelectBulkPacketSize(ep_data_out_);
+    const uint16_t data_in_mps = SelectBulkPacketSize(ep_data_in_);
+
     ep_cmd_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::BULK, CMD_PACKET_SIZE, false});
+        {Endpoint::Direction::OUT, Endpoint::Type::BULK, cmd_out_mps, false});
     ep_cmd_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::BULK, CMD_PACKET_SIZE, false});
+        {Endpoint::Direction::IN, Endpoint::Type::BULK, cmd_in_mps, false});
     ep_data_out_->Configure(
-        {Endpoint::Direction::OUT, Endpoint::Type::BULK, DATA_PACKET_SIZE, false});
+        {Endpoint::Direction::OUT, Endpoint::Type::BULK, data_out_mps, false});
     ep_data_in_->Configure(
-        {Endpoint::Direction::IN, Endpoint::Type::BULK, DATA_PACKET_SIZE, false});
+        {Endpoint::Direction::IN, Endpoint::Type::BULK, data_in_mps, false});
 
     ep_cmd_out_->SetOnTransferCompleteCallback(on_cmd_out_cb_);
     ep_cmd_in_->SetOnTransferCompleteCallback(on_cmd_in_cb_);
@@ -106,8 +113,8 @@ class WchLinkRvClass : public DeviceClass
                         0,
                         4,
                         0xFF,  // vendor specific
-                        0x00,
-                        0x00,
+                        0x80,  // WCH-Link vendor subclass
+                        0x55,  // WCH-Link vendor protocol
                         0};
 
     desc_block_.ep_cmd_out = {7,
@@ -137,20 +144,19 @@ class WchLinkRvClass : public DeviceClass
 
     SetData(RawData{reinterpret_cast<uint8_t*>(&desc_block_), sizeof(desc_block_)});
 
-    pending_cmd_valid_ = false;
-    session_started_ = false;
+    ResetCommandResponseQueue();
+    session_state_ = SessionState::ACTIVE;
     ResetRuntimeModel();
 
     inited_ = true;
     ArmCommandOutIfIdle();
-    ArmDataOutIfIdle();
   }
 
   void UnbindEndpoints(EndpointPool& endpoint_pool, bool) override
   {
     inited_ = false;
-    pending_cmd_valid_ = false;
-    session_started_ = false;
+    ResetCommandResponseQueue();
+    session_state_ = SessionState::DISCONNECTED;
 
     ReleaseEndpoint(endpoint_pool, ep_cmd_in_);
     ReleaseEndpoint(endpoint_pool, ep_cmd_out_);
@@ -212,8 +218,6 @@ class WchLinkRvClass : public DeviceClass
 
   void OnCommandOut(bool /*in_isr*/, LibXR::ConstRawData& data)
   {
-    TryFinalizeDataInRecovery();
-
     const auto* req_raw = static_cast<const uint8_t*>(data.addr_);
     const uint16_t req_raw_len = static_cast<uint16_t>(data.size_);
     if (!req_raw || req_raw_len == 0u)
@@ -228,287 +232,56 @@ class WchLinkRvClass : public DeviceClass
     std::memcpy(req_shadow.data(), req_raw, req_len);
     const auto* req = req_shadow.data();
 
-    const bool start_with_probe_info = IsGetProbeInfoRequest(req, req_len);
-    const bool start_with_attach = IsAttachChipRequest(req, req_len);
-
-    // Drop stale queued OUT frames from prior sessions until the host starts
-    // with a clean GetProbeInfo transaction. Accept AttachChip as an
-    // alternative start marker because some host flows reattach directly after
-    // OptEnd without re-querying probe info.
-    if (start_with_probe_info || start_with_attach)
-    {
-      // Treat GetProbeInfo/Attach as a fresh command-plane boundary.
-      // Keep host-selected chip family only for the normal in-session path:
-      // GetProbeInfo -> SetSpeed(0x0C) -> Attach(0x0D/0x02).
-      // Otherwise clear stale selection to avoid cross-session carry-over.
-      const bool keep_selected_chip_for_attach = start_with_attach &&
-                                                 chip_family_selected_by_speed_ &&
-                                                 chip_family_selected_for_next_attach_ && !attached_;
-      const bool clear_host_selected_chip = !keep_selected_chip_for_attach;
-      PrepareFreshSessionStart(clear_host_selected_chip);
-      session_started_ = true;
-    }
-    else if (!session_started_)
-    {
-      // Keep dropping stale pre-session frames until host starts with
-      // GetProbeInfo/Attach. This avoids injecting unexpected error frames into
-      // host reconnect sequences.
-      ArmCommandOutIfIdle();
-      return;
-    }
-
     std::array<uint8_t, CMD_PACKET_SIZE> resp_shadow = {};
     uint16_t out_len = 0u;
     (void)HandleCommand(req, req_len, resp_shadow.data(), static_cast<uint16_t>(resp_shadow.size()),
                         out_len);
     QueueCommandResponse(resp_shadow.data(), out_len);
+    PumpReadStreamIfIdle();
+    ArmCommandOutIfIdle();
   }
 
   void QueueCommandResponse(const uint8_t* resp, uint16_t out_len)
   {
+    std::array<uint8_t, 3> err_resp = {};
     if (!resp || out_len == 0u)
     {
-      // Avoid silent no-response path: return explicit protocol error when the
-      // command handler produced an empty payload.
-      if (TryStartProtocolErrorCommandIn(0x55u))
+      uint16_t err_len = 0u;
+      if (BuildErrorResponse(0x55u, err_resp.data(), static_cast<uint16_t>(err_resp.size()),
+                             err_len) != ErrorCode::OK ||
+          err_len == 0u)
       {
-        pending_cmd_overflow_count_ = 0u;
         return;
       }
-      QueueCommandOverflowError();
-      ArmCommandOutIfIdle();
-      return;
+      resp = err_resp.data();
+      out_len = err_len;
     }
 
-    if (TryStartCommandInPayloadWithRecovery(resp, out_len))
+    if (out_len > CMD_PACKET_SIZE)
     {
-      // Do not inject delayed historical overflow errors after a successful
-      // command response, to keep host request/response pairing stable.
-      pending_cmd_overflow_count_ = 0u;
-      return;
+      out_len = CMD_PACKET_SIZE;
     }
 
-    if (ep_cmd_in_ && ep_cmd_in_->GetState() == Endpoint::State::BUSY &&
-        !pending_cmd_valid_ && out_len <= pending_cmd_buf_.size())
-    {
-      std::memcpy(pending_cmd_buf_.data(), resp, out_len);
-      pending_cmd_len_ = out_len;
-      pending_cmd_valid_ = true;
-      return;
-    }
-
-    // Queue is already occupied or payload does not fit software backup
-    // buffer. Defer an explicit protocol error frame to avoid silent drop.
-    if (TryStartProtocolErrorCommandIn(0x55u))
-    {
-      return;
-    }
-    QueueCommandOverflowError();
-    ArmCommandOutIfIdle();
-  }
-
-  void ResetBulkInEndpoint(Endpoint* ep_in, uint16_t packet_size,
-                           const LibXR::Callback<LibXR::ConstRawData&>& in_cb)
-  {
-    if (!ep_in)
+    if (TryStartCommandInPayload(resp, out_len))
     {
       return;
     }
 
-    ep_in->Close();
-    ep_in->SetActiveLength(0u);
-    ep_in->Configure({Endpoint::Direction::IN, Endpoint::Type::BULK, packet_size, false});
-    ep_in->SetOnTransferCompleteCallback(in_cb);
-  }
-
-  void ResetBulkInAndRestoreOut(Endpoint* ep_out, Endpoint* ep_in, uint16_t packet_size,
-                                const LibXR::Callback<LibXR::ConstRawData&>& out_cb,
-                                const LibXR::Callback<LibXR::ConstRawData&>& in_cb)
-  {
-    if (!ep_out || !ep_in)
-    {
-      return;
-    }
-
-    // Keep OUT endpoint object alive and reconfigure it after IN close, because
-    // some backends disable both directions when IN is closed.
-    ResetBulkInEndpoint(ep_in, packet_size, in_cb);
-    ep_out->SetActiveLength(0u);
-    ep_out->Configure({Endpoint::Direction::OUT, Endpoint::Type::BULK, packet_size, false});
-    ep_out->SetOnTransferCompleteCallback(out_cb);
-  }
-
-  void ResetCommandPlaneEndpoints(bool arm_out = true)
-  {
-    ResetBulkInAndRestoreOut(ep_cmd_out_, ep_cmd_in_, CMD_PACKET_SIZE, on_cmd_out_cb_, on_cmd_in_cb_);
-    if (arm_out)
-    {
-      ArmCommandOutIfIdle();
-    }
-  }
-
-  void ResetDataPlaneEndpoints(bool arm_out = true)
-  {
-    ResetBulkInAndRestoreOut(ep_data_out_, ep_data_in_, DATA_PACKET_SIZE, on_data_out_cb_, on_data_in_cb_);
-    if (arm_out)
-    {
-      ArmDataOutIfIdle();
-    }
-  }
-
-  void ResetDataInEndpoint()
-  {
-    data_ack_in_flight_ = false;
-    ResetBulkInEndpoint(ep_data_in_, DATA_PACKET_SIZE, on_data_in_cb_);
-    ArmDataOutIfIdle();
-  }
-
-  void ResetCommandInEndpoint()
-  {
-    ResetBulkInEndpoint(ep_cmd_in_, CMD_PACKET_SIZE, on_cmd_in_cb_);
-  }
-
-  bool TryStartCommandInPayloadWithRecovery(const uint8_t* payload, uint16_t len)
-  {
-    if (!payload || len == 0u || !ep_cmd_in_)
-    {
-      return false;
-    }
-
-    auto try_start_once = [&]() -> bool
-    {
-      if (!ep_cmd_in_ || ep_cmd_in_->GetState() != Endpoint::State::IDLE)
-      {
-        return false;
-      }
-      auto tx = ep_cmd_in_->GetBuffer();
-      if (!tx.addr_ || tx.size_ < len)
-      {
-        return false;
-      }
-      std::memcpy(tx.addr_, payload, len);
-      return ep_cmd_in_->Transfer(len) == ErrorCode::OK;
-    };
-
-    if (try_start_once())
-    {
-      return true;
-    }
-
-    // Busy is handled by normal completion callback retry path.
-    if (!ep_cmd_in_ || ep_cmd_in_->GetState() == Endpoint::State::BUSY)
-    {
-      return false;
-    }
-
-    // Hard failure while not busy: recover command IN only. Avoid touching
-    // OUT here because OUT may already have an in-flight host transfer.
-    ResetCommandInEndpoint();
-    return try_start_once();
-  }
-
-  bool TryStartProtocolErrorCommandIn(uint8_t reason)
-  {
-    uint8_t err[3] = {};
-    uint16_t out_len = 0u;
-    if (BuildErrorResponse(reason, err, static_cast<uint16_t>(sizeof(err)), out_len) != ErrorCode::OK)
-    {
-      return false;
-    }
-    return TryStartCommandInPayloadWithRecovery(err, out_len);
-  }
-
-  void ScheduleDataInRecovery()
-  {
-    data_in_recovery_pending_ = true;
-    data_in_recovery_spins_ = 0u;
-  }
-
-  void TryFinalizeDataInRecovery()
-  {
-    if (!data_in_recovery_pending_)
-    {
-      return;
-    }
-
-    if (!IsDataInBusy())
-    {
-      data_in_recovery_pending_ = false;
-      data_in_recovery_spins_ = 0u;
-      read_stream_fault_pending_finalize_ = false;
-      ResetDataInEndpoint();
-      return;
-    }
-
-    if (data_in_recovery_spins_ < kDataInRecoveryForceAfterSpins)
-    {
-      ++data_in_recovery_spins_;
-      return;
-    }
-
-    // Recovery deadline reached: force-close EP2 IN to break a stuck BUSY
-    // state and avoid indefinite ACK/data plane starvation.
-    data_in_recovery_pending_ = false;
-    data_in_recovery_spins_ = 0u;
-    read_stream_fault_pending_finalize_ = false;
-    ResetDataInEndpoint();
+    (void)HoldPendingCommandResponse(resp, out_len);
   }
 
   void OnCommandIn(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
   {
-    TryFinalizeDataInRecovery();
-
-    if (!pending_cmd_valid_)
-    {
-      if (pending_cmd_overflow_count_ != 0u)
-      {
-        if (TryStartProtocolErrorCommandIn(0x55u))
-        {
-          --pending_cmd_overflow_count_;
-          return;
-        }
-        ArmCommandOutIfIdle();
-        return;
-      }
-      PumpReadStreamIfIdle();
-      ArmCommandOutIfIdle();
-      return;
-    }
-
-    if (TryStartCommandInPayloadWithRecovery(pending_cmd_buf_.data(), pending_cmd_len_))
-    {
-      pending_cmd_valid_ = false;
-      pending_cmd_len_ = 0u;
-      pending_cmd_overflow_count_ = 0u;
-      return;
-    }
-
-    // Do bounded in-callback retries before dropping the pending response.
-    for (uint8_t i = 0u; i < kPendingCmdSendRetryLimit; ++i)
-    {
-      if (TryStartCommandInPayloadWithRecovery(pending_cmd_buf_.data(), pending_cmd_len_))
-      {
-        pending_cmd_valid_ = false;
-        pending_cmd_len_ = 0u;
-        pending_cmd_overflow_count_ = 0u;
-        return;
-      }
-    }
-
-    pending_cmd_valid_ = false;
-    pending_cmd_len_ = 0u;
-    if (TryStartProtocolErrorCommandIn(0x55u))
+    if (SubmitPendingCommandResponseIfIdle())
     {
       return;
     }
-    QueueCommandOverflowError();
+    PumpReadStreamIfIdle();
     ArmCommandOutIfIdle();
   }
 
   void OnDataOut(bool /*in_isr*/, LibXR::ConstRawData& data)
   {
-    TryFinalizeDataInRecovery();
-
     const auto* rx = static_cast<const uint8_t*>(data.addr_);
     const uint32_t rx_bytes = static_cast<uint32_t>(data.size_);
     if (program_mode_ == ProgramMode::WRITE_FLASH_OP)
@@ -520,12 +293,11 @@ class WchLinkRvClass : public DeviceClass
       ProcessFlashStreamData(rx, rx_bytes);
     }
     FlushPendingDataAck();
-    ArmDataOutIfIdle();
+    ArmDataOutForStreamIfIdle();
   }
 
   void OnDataIn(bool /*in_isr*/, LibXR::ConstRawData& /*data*/)
   {
-    TryFinalizeDataInRecovery();
     if (data_ack_in_flight_)
     {
       data_ack_in_flight_ = false;
@@ -541,44 +313,6 @@ class WchLinkRvClass : public DeviceClass
       return;
     }
     FlushPendingDataAck();
-  }
-
-  void PrepareFreshSessionStart(bool clear_host_selected_chip)
-  {
-    // Host reconnection may leave unread/stale IN payload in previous session.
-    // Reset software queue and model state to guarantee the new session starts
-    // from GetProbeInfo/Attach on a clean command/data plane.
-    pending_cmd_valid_ = false;
-    pending_cmd_len_ = 0u;
-    pending_cmd_overflow_count_ = 0u;
-    attached_ = false;
-    read_stream_fault_latched_ = false;
-    read_stream_fault_pending_finalize_ = false;
-    if (clear_host_selected_chip)
-    {
-      ClearHostSelectedChipFamily();
-    }
-    ExitProgramStream();
-    ExitReadStream();
-    sdi_.Close();
-
-    // Do not re-arm EP1 OUT here: we are still handling the current command
-    // in OnCommandOut. Re-arming too early can allow command overlap on single
-    // EP1 IN buffer and corrupt in-flight responses.
-    ResetCommandPlaneEndpoints(false);
-
-    // Avoid aggressive EP2 OUT reconfigure in command callback. Recover EP2 IN
-    // only and keep OUT side naturally drained/armed.
-    if (IsDataInBusy())
-    {
-      ScheduleDataInRecovery();
-    }
-    else
-    {
-      data_in_recovery_pending_ = false;
-      data_in_recovery_spins_ = 0u;
-      ResetDataInEndpoint();
-    }
   }
 
   void ResetRuntimeModel()
@@ -599,14 +333,16 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_next_ack_at_ = 0u;
     flash_stream_write_addr_ = 0u;
     flash_stream_error_ = false;
+    flash_page_buffer_addr_ = 0u;
+    flash_page_buffer_active_ = false;
+    flash_page_buffer_dirty_ = false;
+    flash_page_buffer_.fill(0xFFu);
+    target_debug_session_active_ = false;
+    target_debug_session_needs_resume_ = false;
+    target_flash_fast_mode_ready_ = false;
     pending_data_ack_ = 0u;
     data_ack_in_flight_ = false;
-    pending_cmd_overflow_count_ = 0u;
     read_stream_active_ = false;
-    read_stream_fault_latched_ = false;
-    read_stream_fault_pending_finalize_ = false;
-    data_in_recovery_pending_ = false;
-    data_in_recovery_spins_ = 0u;
     read_stream_addr_ = 0u;
     read_stream_remaining_ = 0u;
     read_stream_error_ = false;
@@ -666,43 +402,111 @@ class WchLinkRvClass : public DeviceClass
     switch (chip_family)
     {
       case 0x01u:  // CH32V103
-        return bytes == 494u;
+        return MatchFlashOpLengthWithPadding(bytes, 494u);
       case 0x02u:  // CH57X
-        return bytes == 1102u;
+        return MatchFlashOpLengthWithPadding(bytes, 1102u);
       case 0x03u:  // CH56X
-        return bytes == 1156u;
+        return MatchFlashOpLengthWithPadding(bytes, 1156u);
       case 0x05u:  // CH32V20X
       case 0x06u:  // CH32V30X
-        return bytes == 446u;
+        return MatchFlashOpLengthWithPadding(bytes, 446u);
       case 0x07u:  // CH582/583
       case 0x0Bu:  // CH59X
       case 0x4Bu:  // CH585
-        return bytes == 1326u;
+        return MatchFlashOpLengthWithPadding(bytes, 1326u);
       case 0x09u:  // CH32V003
       case 0x49u:  // CH641
-        return bytes == 498u || bytes == 466u;
+        return MatchFlashOpLengthWithPadding(bytes, 498u) ||
+               MatchFlashOpLengthWithPadding(bytes, 466u);
       case 0x0Au:  // CH8571
-        return bytes == 1408u || bytes == 1386u;
+        return MatchFlashOpLengthWithPadding(bytes, 1408u) ||
+               MatchFlashOpLengthWithPadding(bytes, 1386u);
       case 0x0Cu:  // CH643
       case 0x0Du:  // CH32X035
-        return bytes == 488u;
+        return MatchFlashOpLengthWithPadding(bytes, 488u);
       case 0x0Eu:  // CH32L103
-        return bytes == 512u;
+        return MatchFlashOpLengthWithPadding(bytes, 512u);
       case 0x0Fu:  // CH564
-        return bytes == 1532u;
+        return MatchFlashOpLengthWithPadding(bytes, 1532u);
       case 0x4Eu:  // CH32V007
-        return bytes == 500u;
+        return MatchFlashOpLengthWithPadding(bytes, 500u);
       case 0x46u:  // CH645
-        return bytes == 440u || bytes == 486u;
+        return MatchFlashOpLengthWithPadding(bytes, 440u) ||
+               MatchFlashOpLengthWithPadding(bytes, 486u);
       case 0x86u:  // CH32V317
-        return bytes == 440u || bytes == 460u;
+        return MatchFlashOpLengthWithPadding(bytes, 440u) ||
+               MatchFlashOpLengthWithPadding(bytes, 460u);
       default:
         // Unknown family: keep compatibility, but still reject empty flash-op.
         return bytes > 0u;
     }
   }
 
+  static uint32_t RoundUpU32(uint32_t value, uint32_t align)
+  {
+    if (align == 0u)
+    {
+      return value;
+    }
+    const uint32_t rem = value % align;
+    return (rem == 0u) ? value : (value + align - rem);
+  }
+
+  static bool MatchFlashOpLengthWithPadding(uint32_t actual_bytes, uint32_t logical_bytes)
+  {
+    if (logical_bytes == 0u)
+    {
+      return false;
+    }
+    if (actual_bytes == logical_bytes)
+    {
+      return true;
+    }
+
+    // wlink sends flash-op payloads over EP2 in 256-byte chunks and pads the
+    // final chunk with trailing zeroes. Accept the transport-sized length while
+    // still rejecting unrelated payload sizes.
+    return actual_bytes == RoundUpU32(logical_bytes, 256u);
+  }
+
   static uint32_t MinU32(uint32_t a, uint32_t b) { return (a < b) ? a : b; }
+
+  static uint32_t AlignDownU32(uint32_t value, uint32_t align)
+  {
+    if (align == 0u)
+    {
+      return value;
+    }
+    return value & ~(align - 1u);
+  }
+
+  static uint32_t AlignUpU32(uint32_t value, uint32_t align)
+  {
+    if (align == 0u)
+    {
+      return value;
+    }
+    return AlignDownU32(value + align - 1u, align);
+  }
+
+  static uint8_t DetectChipFamilyFromChipId(uint32_t chip_id)
+  {
+    // Keep mapping consistent with wlink chip-id family grouping.
+    switch (chip_id & 0xFFF00000u)
+    {
+      case 0x20300000u:  // CH32V203
+      case 0x20800000u:  // CH32V208
+        return 0x05u;    // CH32V20X
+      case 0x30300000u:  // CH32V303
+      case 0x30500000u:  // CH32V305
+      case 0x30700000u:  // CH32V307
+        return 0x06u;    // CH32V30X
+      case 0x31700000u:  // CH32V317
+        return 0x86u;
+      default:
+        return 0u;
+    }
+  }
 
   static uint8_t AckToDmiOp(LibXR::Debug::Sdi::Ack ack)
   {
@@ -718,6 +522,207 @@ class WchLinkRvClass : public DeviceClass
       default:
         return 0x02u;
     }
+  }
+
+  static void BusyDelayCycles(uint32_t cycles)
+  {
+    volatile uint32_t n = cycles;
+    while (n-- > 0u)
+    {
+      __asm__ volatile("nop");
+    }
+  }
+
+  void PulseTargetReset()
+  {
+    if (!nreset_gpio_)
+    {
+      return;
+    }
+
+    (void)nreset_gpio_->SetConfig(
+        {LibXR::GPIO::Direction::OUTPUT_PUSH_PULL, LibXR::GPIO::Pull::NONE});
+    nreset_gpio_->Write(false);
+    BusyDelayCycles(120000u);
+    nreset_gpio_->Write(true);
+    BusyDelayCycles(180000u);
+  }
+
+  static bool IsPlausibleDmiRegisterValue(uint32_t value)
+  {
+    return value != 0x00000000u && value != 0xFFFFFFFFu;
+  }
+
+  enum class AttachFailureStage : uint8_t
+  {
+    ENTER_SDI = 0u,
+    DMACTIVE,
+    DMSTATUS,
+    DMSTATUS_ZERO,
+    DMSTATUS_ALL_ONES,
+    ABSTRACTCS,
+    CHIP_ID,
+  };
+
+  enum class DmiWordReadStatus : uint8_t
+  {
+    TRANSACTION = 0u,
+    ZERO,
+    ALL_ONES,
+    OK,
+  };
+
+  bool ReadValidatedDmiWord(uint8_t addr, uint32_t& data)
+  {
+    LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
+    const ErrorCode ec = riscv_target_.DmiRead(addr, data, ack);
+    return ec == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK &&
+           IsPlausibleDmiRegisterValue(data);
+  }
+
+  bool ReadDmiWordForAttach(uint8_t addr, uint32_t& data, DmiWordReadStatus& status)
+  {
+    LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
+    const ErrorCode ec = riscv_target_.DmiRead(addr, data, ack);
+    if (ec != ErrorCode::OK || ack != LibXR::Debug::Sdi::Ack::OK)
+    {
+      status = DmiWordReadStatus::TRANSACTION;
+      return false;
+    }
+    if (data == 0x00000000u)
+    {
+      status = DmiWordReadStatus::ZERO;
+      return false;
+    }
+    if (data == 0xFFFFFFFFu)
+    {
+      status = DmiWordReadStatus::ALL_ONES;
+      return false;
+    }
+
+    status = DmiWordReadStatus::OK;
+    return true;
+  }
+
+  bool WriteValidatedDmiWord(uint8_t addr, uint32_t data)
+  {
+    LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
+    const ErrorCode ec = riscv_target_.DmiWrite(addr, data, ack);
+    return ec == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK;
+  }
+
+  bool WarmUpDmStatus(uint32_t& dmstatus, AttachFailureStage& failure_stage)
+  {
+    DmiWordReadStatus last_status = DmiWordReadStatus::TRANSACTION;
+    for (uint8_t attempt = 0u; attempt < 8u; ++attempt)
+    {
+      if (ReadDmiWordForAttach(kAttachDmstatusAddr, dmstatus, last_status))
+      {
+        return true;
+      }
+
+      (void)WriteValidatedDmiWord(kAttachDmcontrolAddr, 0x00000001u);
+      sdi_.IdleClocks(static_cast<uint32_t>(16u + attempt * 8u));
+    }
+
+    switch (last_status)
+    {
+      case DmiWordReadStatus::ZERO:
+        failure_stage = AttachFailureStage::DMSTATUS_ZERO;
+        break;
+      case DmiWordReadStatus::ALL_ONES:
+        failure_stage = AttachFailureStage::DMSTATUS_ALL_ONES;
+        break;
+      case DmiWordReadStatus::TRANSACTION:
+      case DmiWordReadStatus::OK:
+      default:
+        failure_stage = AttachFailureStage::DMSTATUS;
+        break;
+    }
+
+    return false;
+  }
+
+  bool ActivateDebugModule()
+  {
+    for (uint8_t attempt = 0u; attempt < 4u; ++attempt)
+    {
+      (void)WriteValidatedDmiWord(kAttachDmcontrolAddr, 0x00000000u);
+      sdi_.IdleClocks(8u);
+
+      if (!WriteValidatedDmiWord(kAttachDmcontrolAddr, 0x00000001u))
+      {
+        sdi_.IdleClocks(16u);
+        continue;
+      }
+
+      sdi_.IdleClocks(static_cast<uint32_t>(16u + attempt * 8u));
+
+      uint32_t dmcontrol = 0u;
+      if (ReadValidatedDmiWord(kAttachDmcontrolAddr, dmcontrol) && (dmcontrol & 0x1u) != 0u)
+      {
+        sdi_.IdleClocks(16u);
+        return true;
+      }
+
+      sdi_.IdleClocks(24u);
+    }
+
+    return false;
+  }
+
+  static uint8_t AttachFailureReasonCode(AttachFailureStage stage)
+  {
+    switch (stage)
+    {
+      case AttachFailureStage::DMACTIVE:
+        return 0x5Au;
+      case AttachFailureStage::DMSTATUS:
+        return 0x57u;
+      case AttachFailureStage::DMSTATUS_ZERO:
+        return 0x5Bu;
+      case AttachFailureStage::DMSTATUS_ALL_ONES:
+        return 0x5Cu;
+      case AttachFailureStage::ABSTRACTCS:
+        return 0x58u;
+      case AttachFailureStage::CHIP_ID:
+        return 0x59u;
+      case AttachFailureStage::ENTER_SDI:
+      default:
+        return 0x56u;
+    }
+  }
+
+  bool TryAttachTarget(typename RiscvDmiTarget<SdiPort>::ProbeData& probe_data,
+                       AttachFailureStage& failure_stage)
+  {
+    if (!ActivateDebugModule())
+    {
+      failure_stage = AttachFailureStage::DMACTIVE;
+      return false;
+    }
+
+    uint32_t dmstatus = 0u;
+    if (!WarmUpDmStatus(dmstatus, failure_stage))
+    {
+      return false;
+    }
+
+    uint32_t abstractcs = 0u;
+    if (!ReadValidatedDmiWord(kAttachAbstractcsAddr, abstractcs))
+    {
+      failure_stage = AttachFailureStage::ABSTRACTCS;
+      return false;
+    }
+
+    const bool probe_ok =
+        riscv_target_.ProbeChipIdentity(probe_data) || riscv_target_.ProbeChipIdentity(probe_data);
+    if (!probe_ok || probe_data.chip_id == 0u || probe_data.chip_id == 0xFFFFFFFFu)
+    {
+      failure_stage = AttachFailureStage::CHIP_ID;
+      return false;
+    }
+    return true;
   }
 
   static ErrorCode BuildDmiResponse(uint8_t addr, uint32_t data, uint8_t op, uint8_t* resp,
@@ -772,16 +777,6 @@ class WchLinkRvClass : public DeviceClass
     return ErrorCode::OK;
   }
 
-  static bool IsDmHalted(uint32_t dmstatus)
-  {
-    return (dmstatus & (1u << 9u)) != 0u && (dmstatus & (1u << 8u)) != 0u;
-  }
-
-  static bool IsDmRunning(uint32_t dmstatus)
-  {
-    return (dmstatus & (1u << 11u)) != 0u && (dmstatus & (1u << 10u)) != 0u;
-  }
-
   uint8_t ActiveChipFamily() const
   {
     if (requested_chip_family_ != 0u)
@@ -798,29 +793,40 @@ class WchLinkRvClass : public DeviceClass
     chip_family_selected_for_next_attach_ = false;
   }
 
-  bool IsDataInBusy() const
-  {
-    return ep_data_in_ != nullptr && ep_data_in_->GetState() == Endpoint::State::BUSY;
-  }
-
-  void HandleReadStreamLinkFault(bool defer_data_in_finalize = false)
+  void HandleReadStreamLinkFault(bool /*defer_data_in_finalize*/ = false)
   {
     read_stream_active_ = false;
     attached_ = false;
-    read_stream_fault_latched_ = true;
-    const bool need_defer = defer_data_in_finalize || IsDataInBusy();
-    read_stream_fault_pending_finalize_ = need_defer;
-    if (need_defer)
-    {
-      ScheduleDataInRecovery();
-    }
+    session_state_ = SessionState::LINK_FAULT;
     sdi_.Close();
-    if (!need_defer)
+  }
+
+  bool ShouldAcceptDataOut() const
+  {
+    if (program_mode_ == ProgramMode::WRITE_FLASH_OP)
     {
-      data_in_recovery_pending_ = false;
-      data_in_recovery_spins_ = 0u;
-      ResetDataInEndpoint();
+      return true;
     }
+
+    if (program_mode_ == ProgramMode::WRITE_FLASH_STREAM)
+    {
+      if (flash_stream_error_)
+      {
+        return false;
+      }
+      return !IsFlashWriteFinished();
+    }
+
+    return false;
+  }
+
+  void ArmDataOutForStreamIfIdle()
+  {
+    if (!ShouldAcceptDataOut())
+    {
+      return;
+    }
+    ArmDataOutIfIdle();
   }
 
   void QueueDataAck(uint8_t count = 1u)
@@ -845,7 +851,6 @@ class WchLinkRvClass : public DeviceClass
   void EnterFlashOpStream()
   {
     ExitReadStream();
-    ResetDataInEndpoint();
     program_mode_ = ProgramMode::WRITE_FLASH_OP;
     flash_op_rx_bytes_ = 0u;
     flash_op_ready_ = false;
@@ -854,8 +859,13 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_next_ack_at_ = 0u;
     flash_stream_write_addr_ = 0u;
     flash_stream_error_ = false;
+    flash_page_buffer_addr_ = 0u;
+    flash_page_buffer_active_ = false;
+    flash_page_buffer_dirty_ = false;
+    flash_page_buffer_.fill(0xFFu);
     pending_data_ack_ = 0u;
     data_ack_in_flight_ = false;
+    ArmDataOutForStreamIfIdle();
   }
 
   void ExitProgramStream()
@@ -868,6 +878,10 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_next_ack_at_ = 0u;
     flash_stream_write_addr_ = 0u;
     flash_stream_error_ = false;
+    flash_page_buffer_addr_ = 0u;
+    flash_page_buffer_active_ = false;
+    flash_page_buffer_dirty_ = false;
+    flash_page_buffer_.fill(0xFFu);
     pending_data_ack_ = 0u;
     data_ack_in_flight_ = false;
   }
@@ -885,14 +899,22 @@ class WchLinkRvClass : public DeviceClass
       return false;
     }
 
-    const uint32_t chunk = DecodeWritePackBytes(ActiveChipFamily());
-    flash_stream_chunk_bytes_ = (chunk == 0u) ? kDefaultWritePackSize : chunk;
+    // Host-side wlink streams flash payloads over EP2 in 256-byte packets and
+    // waits for an EP2-IN ack after each packet, even when the logical write
+    // pack size is 4096 bytes. Keep the ack cadence aligned with the transport
+    // packet size to avoid host/device deadlock mid-programming.
+    flash_stream_chunk_bytes_ = kFlashStreamAckBytes;
     flash_stream_rx_bytes_ = 0u;
     flash_stream_next_ack_at_ = MinU32(flash_stream_chunk_bytes_, flash_stream_total_raw_bytes_);
     flash_stream_write_addr_ = write_region_addr_;
     flash_stream_error_ = false;
+    flash_page_buffer_addr_ = 0u;
+    flash_page_buffer_active_ = false;
+    flash_page_buffer_dirty_ = false;
+    flash_page_buffer_.fill(0xFFu);
     pending_data_ack_ = 0u;
     program_mode_ = ProgramMode::WRITE_FLASH_STREAM;
+    ArmDataOutForStreamIfIdle();
     return true;
   }
 
@@ -959,13 +981,18 @@ class WchLinkRvClass : public DeviceClass
       return true;
     }
 
+    if (ActiveChipFamily() == 0x05u)
+    {
+      return WriteFlashStreamChunkV20x(data, size);
+    }
+
     uint32_t off = 0u;
     while (off < size)
     {
       if (((flash_stream_write_addr_ & 0x3u) == 0u) && (size - off >= 4u))
       {
         const uint32_t word = LoadLe32(data + off);
-        if (!TryWriteTargetWordByAbstract(flash_stream_write_addr_, word))
+        if (!riscv_target_.WriteWordByAbstract(flash_stream_write_addr_, word))
         {
           return false;
         }
@@ -974,7 +1001,7 @@ class WchLinkRvClass : public DeviceClass
       }
       else
       {
-        if (!TryWriteTargetByteByAbstract(flash_stream_write_addr_, data[off]))
+        if (!riscv_target_.WriteByteByAbstract(flash_stream_write_addr_, data[off]))
         {
           return false;
         }
@@ -985,15 +1012,310 @@ class WchLinkRvClass : public DeviceClass
     return true;
   }
 
-  void EnterReadStream(uint32_t addr, uint32_t len)
+  bool WriteFlashStreamChunkV20x(const uint8_t* data, uint32_t size)
   {
+    if (!EnsureTargetFlashWriteSession())
+    {
+      return false;
+    }
+
+    uint32_t off = 0u;
+    while (off < size)
+    {
+      const uint32_t page_addr = AlignDownU32(flash_stream_write_addr_, kTargetFlashPageBytes);
+      if (!flash_page_buffer_active_)
+      {
+        BeginFlashPageBuffer(page_addr);
+      }
+      else if (flash_page_buffer_addr_ != page_addr)
+      {
+        if (!FlushFlashPageBuffer())
+        {
+          return false;
+        }
+        BeginFlashPageBuffer(page_addr);
+      }
+
+      const uint32_t page_off = flash_stream_write_addr_ - flash_page_buffer_addr_;
+      const uint32_t chunk = MinU32(size - off, kTargetFlashPageBytes - page_off);
+      std::memcpy(flash_page_buffer_.data() + page_off, data + off, chunk);
+      flash_page_buffer_dirty_ = true;
+      flash_stream_write_addr_ += chunk;
+      off += chunk;
+
+      if ((page_off + chunk) >= kTargetFlashPageBytes)
+      {
+        if (!FlushFlashPageBuffer())
+        {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  void BeginFlashPageBuffer(uint32_t page_addr)
+  {
+    flash_page_buffer_addr_ = page_addr;
+    flash_page_buffer_active_ = true;
+    flash_page_buffer_dirty_ = false;
+    flash_page_buffer_.fill(0xFFu);
+  }
+
+  bool FlushFlashPageBuffer()
+  {
+    if (!flash_page_buffer_active_)
+    {
+      return true;
+    }
+
+    const bool should_program = flash_page_buffer_dirty_;
+    const uint32_t page_addr = flash_page_buffer_addr_;
+    flash_page_buffer_active_ = false;
+    flash_page_buffer_dirty_ = false;
+
+    if (!should_program)
+    {
+      return true;
+    }
+
+    if (!EraseFlashPage256(page_addr))
+    {
+      return false;
+    }
+    if (!ProgramFlashPage256(page_addr, flash_page_buffer_))
+    {
+      return false;
+    }
+
+    flash_page_buffer_.fill(0xFFu);
+    return true;
+  }
+
+  bool FinalizeFlashWriteStream()
+  {
+    if (ActiveChipFamily() != 0x05u)
+    {
+      return true;
+    }
+    return FlushFlashPageBuffer();
+  }
+
+  bool EnsureTargetDebugSession()
+  {
+    if (target_debug_session_active_)
+    {
+      return true;
+    }
+
+    bool need_resume = false;
+    if (!riscv_target_.BeginHartHaltSession(need_resume))
+    {
+      return false;
+    }
+    target_debug_session_active_ = true;
+    target_debug_session_needs_resume_ = need_resume;
+    return true;
+  }
+
+  void EndTargetDebugSession()
+  {
+    if (target_flash_fast_mode_ready_)
+    {
+      (void)WriteTargetFlashRegisterOr(kTargetFlashCtlr, kTargetFlashCtlLock | kTargetFlashCtlFastLock);
+      target_flash_fast_mode_ready_ = false;
+    }
+
+    if (target_debug_session_active_)
+    {
+      riscv_target_.EndHartHaltSession(target_debug_session_needs_resume_);
+      target_debug_session_active_ = false;
+      target_debug_session_needs_resume_ = false;
+    }
+  }
+
+  bool EnsureTargetFlashWriteSession()
+  {
+    if (!EnsureTargetDebugSession())
+    {
+      return false;
+    }
+
+    if (target_flash_fast_mode_ready_)
+    {
+      return true;
+    }
+
+    if (!WriteTargetFlashRegister(kTargetFlashKeyr, kTargetFlashKey1) ||
+        !WriteTargetFlashRegister(kTargetFlashKeyr, kTargetFlashKey2) ||
+        !WriteTargetFlashRegister(kTargetFlashModekeyr, kTargetFlashKey1) ||
+        !WriteTargetFlashRegister(kTargetFlashModekeyr, kTargetFlashKey2))
+    {
+      return false;
+    }
+
+    target_flash_fast_mode_ready_ = true;
+    return ClearTargetFlashFlags();
+  }
+
+  bool WriteTargetFlashRegister(uint32_t addr, uint32_t value)
+  {
+    return riscv_target_.WriteWordByAbstract(addr, value);
+  }
+
+  bool ReadTargetFlashRegister(uint32_t addr, uint32_t& value)
+  {
+    return riscv_target_.ReadWordByAbstract(addr, value);
+  }
+
+  bool WriteTargetFlashRegisterOr(uint32_t addr, uint32_t bits)
+  {
+    uint32_t value = 0u;
+    if (!ReadTargetFlashRegister(addr, value))
+    {
+      return false;
+    }
+    return WriteTargetFlashRegister(addr, value | bits);
+  }
+
+  bool WriteTargetFlashRegisterAnd(uint32_t addr, uint32_t bits_to_clear)
+  {
+    uint32_t value = 0u;
+    if (!ReadTargetFlashRegister(addr, value))
+    {
+      return false;
+    }
+    return WriteTargetFlashRegister(addr, value & ~bits_to_clear);
+  }
+
+  bool ClearTargetFlashFlags()
+  {
+    return WriteTargetFlashRegister(kTargetFlashStatr,
+                                    kTargetFlashStatWriteProtectErr | kTargetFlashStatEop);
+  }
+
+  bool WaitTargetFlashIdle(uint32_t mask, uint16_t retries = 512u)
+  {
+    for (uint16_t i = 0u; i < retries; ++i)
+    {
+      uint32_t statr = 0u;
+      if (!ReadTargetFlashRegister(kTargetFlashStatr, statr))
+      {
+        return false;
+      }
+      if ((statr & mask) == 0u)
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool CheckTargetFlashError()
+  {
+    uint32_t statr = 0u;
+    if (!ReadTargetFlashRegister(kTargetFlashStatr, statr))
+    {
+      return false;
+    }
+    return (statr & kTargetFlashStatWriteProtectErr) == 0u;
+  }
+
+  bool EraseFlashPage256(uint32_t page_addr)
+  {
+    if (!ClearTargetFlashFlags())
+    {
+      return false;
+    }
+    if (!WriteTargetFlashRegisterOr(kTargetFlashCtlr, kTargetFlashCtlPageErase))
+    {
+      return false;
+    }
+    if (!WriteTargetFlashRegister(kTargetFlashAddr, AlignDownU32(page_addr, kTargetFlashPageBytes)))
+    {
+      return false;
+    }
+    if (!WriteTargetFlashRegisterOr(kTargetFlashCtlr, kTargetFlashCtlStart))
+    {
+      return false;
+    }
+    if (!WaitTargetFlashIdle(kTargetFlashStatBusy))
+    {
+      return false;
+    }
+    if (!WriteTargetFlashRegisterAnd(kTargetFlashCtlr, kTargetFlashCtlPageErase))
+    {
+      return false;
+    }
+    if (!CheckTargetFlashError())
+    {
+      (void)ClearTargetFlashFlags();
+      return false;
+    }
+    return ClearTargetFlashFlags();
+  }
+
+  bool ProgramFlashPage256(uint32_t page_addr, const std::array<uint8_t, 256u>& page)
+  {
+    if (!ClearTargetFlashFlags())
+    {
+      return false;
+    }
+    if (!WriteTargetFlashRegisterOr(kTargetFlashCtlr, kTargetFlashCtlPageProgram))
+    {
+      return false;
+    }
+    if (!WaitTargetFlashIdle(kTargetFlashStatBusy | kTargetFlashStatWriteBusy))
+    {
+      return false;
+    }
+
+    for (uint32_t off = 0u; off < kTargetFlashPageBytes; off += 4u)
+    {
+      if (!riscv_target_.WriteWordByAbstract(page_addr + off, LoadLe32(page.data() + off)))
+      {
+        return false;
+      }
+      if (!WaitTargetFlashIdle(kTargetFlashStatWriteBusy))
+      {
+        return false;
+      }
+    }
+
+    if (!WriteTargetFlashRegisterOr(kTargetFlashCtlr, kTargetFlashCtlPageProgramStart))
+    {
+      return false;
+    }
+    if (!WaitTargetFlashIdle(kTargetFlashStatBusy))
+    {
+      return false;
+    }
+    if (!WriteTargetFlashRegisterAnd(kTargetFlashCtlr, kTargetFlashCtlPageProgram))
+    {
+      return false;
+    }
+    if (!CheckTargetFlashError())
+    {
+      (void)ClearTargetFlashFlags();
+      return false;
+    }
+    return ClearTargetFlashFlags();
+  }
+
+  bool EnterReadStream(uint32_t addr, uint32_t len)
+  {
+    if (!EnsureTargetDebugSession())
+    {
+      return false;
+    }
     ExitProgramStream();
+    session_state_ = SessionState::ACTIVE;
     read_stream_active_ = true;
-    read_stream_fault_latched_ = false;
-    read_stream_fault_pending_finalize_ = false;
     read_stream_addr_ = addr;
     read_stream_remaining_ = len;
     read_stream_error_ = false;
+    return true;
   }
 
   void ExitReadStream()
@@ -1048,7 +1370,7 @@ class WchLinkRvClass : public DeviceClass
       if (!read_stream_error_)
       {
         uint32_t read_word = 0u;
-        if (!TryReadTargetWordByAbstract(read_stream_addr_, read_word))
+        if (!riscv_target_.ReadWordByAbstract(read_stream_addr_, read_word))
         {
           // Keep the EP2 stream progressing to avoid host-side blocking on
           // partial reads after a mid-stream SDI failure.
@@ -1090,269 +1412,6 @@ class WchLinkRvClass : public DeviceClass
     return true;
   }
 
-  bool DmiReadWord(uint8_t addr, uint32_t& data)
-  {
-    LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
-    const ErrorCode ec = sdi_.DmiReadTxn(addr, data, ack);
-    return ec == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK;
-  }
-
-  bool DmiWriteWord(uint8_t addr, uint32_t data)
-  {
-    LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
-    const ErrorCode ec = sdi_.DmiWriteTxn(addr, data, ack);
-    return ec == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK;
-  }
-
-  bool ClearAbstractCommandError() { return DmiWriteWord(kDmiAbstractcs, 0x00000700u); }
-
-  bool WaitAbstractCommandDone()
-  {
-    for (uint8_t i = 0u; i < 32u; ++i)
-    {
-      uint32_t abstractcs = 0u;
-      if (!DmiReadWord(kDmiAbstractcs, abstractcs))
-      {
-        return false;
-      }
-      if ((abstractcs & (1u << 12u)) != 0u)
-      {
-        continue;
-      }
-      if (((abstractcs >> 8u) & 0x7u) != 0u)
-      {
-        (void)ClearAbstractCommandError();
-        return false;
-      }
-      return true;
-    }
-    return false;
-  }
-
-  bool RunAbstractCommand(uint32_t command)
-  {
-    if (!DmiWriteWord(kDmiCommand, command))
-    {
-      return false;
-    }
-    return WaitAbstractCommandDone();
-  }
-
-  bool EnsureHartHaltedForProbe(bool& need_resume)
-  {
-    need_resume = false;
-    uint32_t dmstatus = 0u;
-    if (!DmiReadWord(kDmiDmstatus, dmstatus))
-    {
-      return false;
-    }
-    if (IsDmHalted(dmstatus))
-    {
-      return true;
-    }
-
-    if (!DmiWriteWord(kDmiDmcontrol, 0x80000001u))
-    {
-      return false;
-    }
-
-    for (uint8_t i = 0u; i < 32u; ++i)
-    {
-      if (!DmiReadWord(kDmiDmstatus, dmstatus))
-      {
-        return false;
-      }
-      if (IsDmHalted(dmstatus))
-      {
-        if (!DmiWriteWord(kDmiDmcontrol, 0x00000001u))
-        {
-          return false;
-        }
-        need_resume = true;
-        return true;
-      }
-    }
-    return false;
-  }
-
-  void TryResumeHartAfterProbe(bool need_resume)
-  {
-    if (!need_resume)
-    {
-      return;
-    }
-
-    (void)DmiWriteWord(kDmiDmcontrol, 0x40000001u);
-    for (uint8_t i = 0u; i < 16u; ++i)
-    {
-      uint32_t dmstatus = 0u;
-      if (!DmiReadWord(kDmiDmstatus, dmstatus))
-      {
-        break;
-      }
-      if (IsDmRunning(dmstatus))
-      {
-        break;
-      }
-    }
-    (void)DmiWriteWord(kDmiDmcontrol, 0x00000001u);
-  }
-
-  bool TryReadTargetWordByAbstract(uint32_t addr, uint32_t& data)
-  {
-    if (!DmiWriteWord(kDmiProgbuf0, 0x0002A303u))  // lw x6, 0(x5)
-    {
-      return false;
-    }
-    if (!DmiWriteWord(kDmiProgbuf1, 0x00100073u))  // ebreak
-    {
-      return false;
-    }
-    if (!DmiWriteWord(kDmiData0, addr))
-    {
-      return false;
-    }
-    if (!ClearAbstractCommandError())
-    {
-      return false;
-    }
-    if (!RunAbstractCommand(0x00271005u))  // x5 <- data0 with postexec
-    {
-      return false;
-    }
-    if (!RunAbstractCommand(0x00221006u))  // data0 <- x6
-    {
-      return false;
-    }
-    return DmiReadWord(kDmiData0, data);
-  }
-
-  bool TryWriteTargetWordByAbstract(uint32_t addr, uint32_t data)
-  {
-    if (!DmiWriteWord(kDmiProgbuf0, 0x0072A023u))  // sw x7, 0(x5)
-    {
-      return false;
-    }
-    if (!DmiWriteWord(kDmiProgbuf1, 0x00100073u))  // ebreak
-    {
-      return false;
-    }
-
-    if (!DmiWriteWord(kDmiData0, addr))
-    {
-      return false;
-    }
-    if (!ClearAbstractCommandError())
-    {
-      return false;
-    }
-    if (!RunAbstractCommand(0x00231005u))  // x5 <- data0
-    {
-      return false;
-    }
-
-    if (!DmiWriteWord(kDmiData0, data))
-    {
-      return false;
-    }
-    if (!ClearAbstractCommandError())
-    {
-      return false;
-    }
-    return RunAbstractCommand(0x00271007u);  // x7 <- data0 with postexec
-  }
-
-  bool TryWriteTargetByteByAbstract(uint32_t addr, uint8_t data)
-  {
-    if (!DmiWriteWord(kDmiProgbuf0, 0x00728023u))  // sb x7, 0(x5)
-    {
-      return false;
-    }
-    if (!DmiWriteWord(kDmiProgbuf1, 0x00100073u))  // ebreak
-    {
-      return false;
-    }
-
-    if (!DmiWriteWord(kDmiData0, addr))
-    {
-      return false;
-    }
-    if (!ClearAbstractCommandError())
-    {
-      return false;
-    }
-    if (!RunAbstractCommand(0x00231005u))  // x5 <- data0
-    {
-      return false;
-    }
-
-    if (!DmiWriteWord(kDmiData0, static_cast<uint32_t>(data)))
-    {
-      return false;
-    }
-    if (!ClearAbstractCommandError())
-    {
-      return false;
-    }
-    return RunAbstractCommand(0x00271007u);  // x7 <- data0 with postexec
-  }
-
-  bool TryProbeChipIdentity(uint32_t& chip_id_out, uint8_t& chip_family_out)
-  {
-    bool need_resume = false;
-    if (!EnsureHartHaltedForProbe(need_resume))
-    {
-      return false;
-    }
-
-    bool ok = true;
-    uint32_t chip_id = 0u;
-    do
-    {
-      if (!TryReadTargetWordByAbstract(kChipIdAddress, chip_id))
-      {
-        ok = false;
-        break;
-      }
-      if (chip_id == 0u || chip_id == 0xFFFFFFFFu)
-      {
-        ok = false;
-        break;
-      }
-
-      chip_id_out = chip_id;
-      if (requested_chip_family_ != 0u)
-      {
-        chip_family_out = requested_chip_family_;
-      }
-      else
-      {
-        chip_family_out = probe_id_.chip_family;
-      }
-
-      uint32_t flash_size = 0u;
-      if (TryReadTargetWordByAbstract(kFlashSizeAddress, flash_size))
-      {
-        esig_flash_size_kb_ = static_cast<uint16_t>(flash_size & 0xFFFFu);
-      }
-
-      uint32_t uid0 = 0u;
-      if (TryReadTargetWordByAbstract(kUidWord0Address, uid0))
-      {
-        esig_uid_word0_ = uid0;
-      }
-
-      uint32_t uid1 = 0u;
-      if (TryReadTargetWordByAbstract(kUidWord1Address, uid1))
-      {
-        esig_uid_word1_ = uid1;
-      }
-    } while (false);
-
-    TryResumeHartAfterProbe(need_resume);
-    return ok;
-  }
-
   ErrorCode BuildEsigV2Response(uint8_t* resp, uint16_t cap, uint16_t& out_len) const
   {
     if (!resp || cap < 20u)
@@ -1390,36 +1449,59 @@ class WchLinkRvClass : public DeviceClass
     if (sub == 0x02u)
     {
       attached_ = false;
-      const ErrorCode ec = sdi_.EnterSdi();
-      if (ec != ErrorCode::OK)
-      {
-        return BuildErrorResponse(0x55u, resp, cap, out_len);
-      }
-
-      uint32_t dmstatus = 0u;
-      if (!DmiReadWord(kDmiDmstatus, dmstatus))
+      EndTargetDebugSession();
+      typename RiscvDmiTarget<SdiPort>::ProbeData probe_data = {};
+      bool attach_ok = false;
+      AttachFailureStage last_failure_stage = AttachFailureStage::ENTER_SDI;
+      for (uint8_t attempt = 0u; attempt < kAttachRetryCount; ++attempt)
       {
         sdi_.Close();
-        return BuildErrorResponse(0x55u, resp, cap, out_len);
-      }
-      UNUSED(dmstatus);
+        PulseTargetReset();
+        BusyDelayCycles(kAttachRetryDelayCycles);
 
-      uint32_t chip_id = probe_id_.chip_id;
-      uint8_t chip_family = (requested_chip_family_ != 0u) ? requested_chip_family_ : probe_id_.chip_family;
-      if (!TryProbeChipIdentity(chip_id, chip_family) &&
-          !TryProbeChipIdentity(chip_id, chip_family))
-      {
-        // Keep attach compatibility with hosts that continue with chip-id
-        // fallback when probe-id read fails.
-        chip_id = 0u;
+        const ErrorCode ec = sdi_.EnterSdi();
+        if (ec != ErrorCode::OK)
+        {
+          last_failure_stage = AttachFailureStage::ENTER_SDI;
+          continue;
+        }
+
+        if (TryAttachTarget(probe_data, last_failure_stage))
+        {
+          attach_ok = true;
+          break;
+        }
       }
-      probe_id_.chip_id = chip_id;
-      if (chip_family != 0u)
+
+      if (!attach_ok)
       {
-        probe_id_.chip_family = chip_family;
+        sdi_.Close();
+        session_state_ = SessionState::LINK_FAULT;
+        probe_id_.chip_id = 0u;
+        esig_flash_size_kb_ = 0u;
+        esig_uid_word0_ = 0u;
+        esig_uid_word1_ = 0u;
+        return BuildErrorResponse(AttachFailureReasonCode(last_failure_stage), resp, cap, out_len);
       }
+
+      probe_id_.chip_id = probe_data.chip_id;
+      esig_flash_size_kb_ = probe_data.flash_size_kb;
+      esig_uid_word0_ = probe_data.uid_word0;
+      esig_uid_word1_ = probe_data.uid_word1;
+
+      uint8_t chip_family = DetectChipFamilyFromChipId(probe_id_.chip_id);
+      if (chip_family == 0u && requested_chip_family_ != 0u && requested_chip_family_ != 0x01u)
+      {
+        chip_family = requested_chip_family_;
+      }
+      if (chip_family == 0u && probe_id_.chip_family != 0u && probe_id_.chip_family != 0x01u)
+      {
+        chip_family = probe_id_.chip_family;
+      }
+      probe_id_.chip_family = chip_family;
+
       attached_ = true;
-      read_stream_fault_latched_ = false;
+      session_state_ = SessionState::ACTIVE;
       // Consume a host-selected family only after a successful attach.
       chip_family_selected_for_next_attach_ = false;
 
@@ -1436,11 +1518,11 @@ class WchLinkRvClass : public DeviceClass
       attached_ = false;
       ExitProgramStream();
       ExitReadStream();
+      EndTargetDebugSession();
       sdi_.Close();
-      read_stream_fault_latched_ = false;
+      session_state_ = SessionState::ACTIVE;
       ClearHostSelectedChipFamily();
-      pending_cmd_overflow_count_ = 0u;
-      session_started_ = false;
+      ResetCommandResponseQueue();
       const uint8_t done[1] = {0xFFu};
       return BuildStandardResponse(0x0Du, done, sizeof(done), resp, cap, out_len);
     }
@@ -1488,20 +1570,22 @@ class WchLinkRvClass : public DeviceClass
 
     if (op == 0x01u)
     {
-      const ErrorCode ec = sdi_.DmiReadTxn(addr, out_data, ack);
+      const ErrorCode ec = riscv_target_.DmiRead(addr, out_data, ack);
       if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
       {
         attached_ = false;
+        session_state_ = SessionState::LINK_FAULT;
         return BuildDmiNotAttachedResponse(resp, cap, out_len);
       }
       out_op = AckToDmiOp(ack);
     }
     else if (op == 0x02u)
     {
-      const ErrorCode ec = sdi_.DmiWriteTxn(addr, data, ack);
+      const ErrorCode ec = riscv_target_.DmiWrite(addr, data, ack);
       if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
       {
         attached_ = false;
+        session_state_ = SessionState::LINK_FAULT;
         return BuildDmiNotAttachedResponse(resp, cap, out_len);
       }
       out_data = data;
@@ -1509,15 +1593,14 @@ class WchLinkRvClass : public DeviceClass
     }
     else if (op == 0x00u)
     {
-      LibXR::Debug::Sdi::Response nop_resp = {};
-      const ErrorCode ec = sdi_.TransferWithRetry({addr, 0u, LibXR::Debug::Sdi::Op::NOP}, nop_resp);
-      if (ec != ErrorCode::OK && ec != ErrorCode::FAILED && ec != ErrorCode::TIMEOUT)
+      const ErrorCode ec = riscv_target_.DmiNop(addr, out_data, ack);
+      if (ec != ErrorCode::OK)
       {
         attached_ = false;
+        session_state_ = SessionState::LINK_FAULT;
         return BuildDmiNotAttachedResponse(resp, cap, out_len);
       }
-      out_data = nop_resp.data;
-      out_op = AckToDmiOp(nop_resp.ack);
+      out_op = AckToDmiOp(ack);
     }
     else
     {
@@ -1570,6 +1653,7 @@ class WchLinkRvClass : public DeviceClass
       FlushPendingDataAck();
       // Program End must arrive after the full write-region payload is streamed.
       if (program_mode_ != ProgramMode::WRITE_FLASH_STREAM || !IsFlashWriteFinished() ||
+          !FinalizeFlashWriteStream() ||
           PendingDataAckBacklog() != 0u || flash_stream_error_)
       {
         return BuildErrorResponse(0x55u, resp, cap, out_len);
@@ -1583,12 +1667,16 @@ class WchLinkRvClass : public DeviceClass
       {
         return BuildErrorResponse(0x55u, resp, cap, out_len);
       }
-      EnterReadStream(read_region_addr_, read_region_len_);
+      if (!EnterReadStream(read_region_addr_, read_region_len_))
+      {
+        return BuildErrorResponse(0x55u, resp, cap, out_len);
+      }
     }
     else if (sub == 0x09u || sub == 0x01u)
     {
       ExitProgramStream();
       ExitReadStream();
+      EndTargetDebugSession();
     }
 
     return BuildStandardResponse(0x02u, &sub, 1u, resp, cap, out_len);
@@ -1618,7 +1706,7 @@ class WchLinkRvClass : public DeviceClass
 
     const uint8_t* payload = req + 3u;
 
-    if (read_stream_fault_latched_)
+    if (session_state_ == SessionState::LINK_FAULT)
     {
       const bool allow_control_recovery =
           cmd == 0x0Du && payload_len >= 1u &&
@@ -1703,9 +1791,15 @@ class WchLinkRvClass : public DeviceClass
     }
   }
 
-  bool TryStartCommandIn(uint16_t len)
+  void ResetCommandResponseQueue()
   {
-    if (!ep_cmd_in_)
+    pending_cmd_resp_valid_ = false;
+    pending_cmd_resp_len_ = 0u;
+  }
+
+  bool TryStartCommandInPayload(const uint8_t* payload, uint16_t len)
+  {
+    if (!payload || len == 0u || !ep_cmd_in_)
     {
       return false;
     }
@@ -1713,10 +1807,47 @@ class WchLinkRvClass : public DeviceClass
     {
       return false;
     }
-    if (ep_cmd_in_->Transfer(len) != ErrorCode::OK)
+
+    auto tx = ep_cmd_in_->GetBuffer();
+    if (!tx.addr_ || tx.size_ < len)
     {
       return false;
     }
+
+    std::memcpy(tx.addr_, payload, len);
+    return ep_cmd_in_->Transfer(len) == ErrorCode::OK;
+  }
+
+  bool HoldPendingCommandResponse(const uint8_t* payload, uint16_t len)
+  {
+    if (!payload || len == 0u || pending_cmd_resp_valid_)
+    {
+      return false;
+    }
+    if (len > CMD_PACKET_SIZE)
+    {
+      len = CMD_PACKET_SIZE;
+    }
+
+    std::memcpy(pending_cmd_resp_.data(), payload, len);
+    pending_cmd_resp_len_ = len;
+    pending_cmd_resp_valid_ = true;
+    return true;
+  }
+
+  bool SubmitPendingCommandResponseIfIdle()
+  {
+    if (!pending_cmd_resp_valid_)
+    {
+      return false;
+    }
+    if (!TryStartCommandInPayload(pending_cmd_resp_.data(), pending_cmd_resp_len_))
+    {
+      return false;
+    }
+
+    pending_cmd_resp_valid_ = false;
+    pending_cmd_resp_len_ = 0u;
     return true;
   }
 
@@ -1750,24 +1881,18 @@ class WchLinkRvClass : public DeviceClass
     return true;
   }
 
-  void QueueCommandOverflowError(uint8_t count = 1u)
-  {
-    if (count == 0u)
-    {
-      return;
-    }
-    const uint16_t next =
-        static_cast<uint16_t>(pending_cmd_overflow_count_) + static_cast<uint16_t>(count);
-    pending_cmd_overflow_count_ = (next > 0xFFu) ? 0xFFu : static_cast<uint8_t>(next);
-  }
-
   void ArmCommandOutIfIdle()
   {
-    if (!ep_cmd_out_)
+    if (!ep_cmd_out_ || !ep_cmd_in_)
     {
       return;
     }
     if (ep_cmd_out_->GetState() != Endpoint::State::IDLE)
+    {
+      return;
+    }
+    // Keep strict command request/response pairing on command plane.
+    if (pending_cmd_resp_valid_ || ep_cmd_in_->GetState() != Endpoint::State::IDLE)
     {
       return;
     }
@@ -1802,38 +1927,55 @@ class WchLinkRvClass : public DeviceClass
   }
 
  private:
+  static uint16_t SelectBulkPacketSize(Endpoint* ep)
+  {
+    if (!ep)
+    {
+      return BULK_MPS_FS;
+    }
+    const auto ep_buf = ep->GetBuffer();
+    if (ep_buf.size_ >= BULK_MPS_HS)
+    {
+      return BULK_MPS_HS;
+    }
+    return BULK_MPS_FS;
+  }
+
+ private:
   static constexpr uint16_t CMD_PACKET_SIZE = 64u;
   static constexpr uint16_t DATA_PACKET_SIZE = 64u;
-  static constexpr uint8_t kDataInRecoveryForceAfterSpins = 16u;
-  static constexpr uint8_t kPendingCmdSendRetryLimit = 2u;
+  static constexpr uint16_t BULK_MPS_FS = 64u;
+  static constexpr uint16_t BULK_MPS_HS = 512u;
   static constexpr std::array<uint8_t, 4> DATA_ACK_FRAME = {0x41u, 0x01u, 0x01u, 0x04u};
   static constexpr uint32_t kDefaultWritePackSize = 4096u;
-  static constexpr uint32_t kSdiClockHzLow = 400'000u;
-  static constexpr uint32_t kSdiClockHzMedium = 4'000'000u;
-  static constexpr uint32_t kSdiClockHzHigh = 6'000'000u;
-  static constexpr uint8_t kDmiData0 = 0x04u;
-  static constexpr uint8_t kDmiDmcontrol = 0x10u;
-  static constexpr uint8_t kDmiDmstatus = 0x11u;
-  static constexpr uint8_t kDmiAbstractcs = 0x16u;
-  static constexpr uint8_t kDmiCommand = 0x17u;
-  static constexpr uint8_t kDmiProgbuf0 = 0x20u;
-  static constexpr uint8_t kDmiProgbuf1 = 0x21u;
-  static constexpr uint32_t kChipIdAddress = 0x1FFFF704u;
-  static constexpr uint32_t kFlashSizeAddress = 0x1FFFF7E0u;
-  static constexpr uint32_t kUidWord0Address = 0x1FFFF7E8u;
-  static constexpr uint32_t kUidWord1Address = 0x1FFFF7ECu;
-
-  static bool IsGetProbeInfoRequest(const uint8_t* req, uint16_t req_len)
-  {
-    return req != nullptr && req_len >= 4u && req[0] == 0x81u && req[1] == 0x0Du &&
-           req[2] == 0x01u && req[3] == 0x01u;
-  }
-
-  static bool IsAttachChipRequest(const uint8_t* req, uint16_t req_len)
-  {
-    return req != nullptr && req_len >= 4u && req[0] == 0x81u && req[1] == 0x0Du &&
-           req[2] == 0x01u && req[3] == 0x02u;
-  }
+  static constexpr uint32_t kFlashStreamAckBytes = 256u;
+  static constexpr uint32_t kSdiClockHzLow = 5'000u;
+  static constexpr uint32_t kSdiClockHzMedium = 10'000u;
+  static constexpr uint32_t kSdiClockHzHigh = 20'000u;
+  static constexpr uint32_t kTargetFlashPageBytes = 256u;
+  static constexpr uint32_t kTargetFlashKey1 = 0x45670123u;
+  static constexpr uint32_t kTargetFlashKey2 = 0xCDEF89ABu;
+  static constexpr uint32_t kTargetFlashBase = 0x40022000u;
+  static constexpr uint32_t kTargetFlashKeyr = kTargetFlashBase + 0x04u;
+  static constexpr uint32_t kTargetFlashStatr = kTargetFlashBase + 0x0Cu;
+  static constexpr uint32_t kTargetFlashCtlr = kTargetFlashBase + 0x10u;
+  static constexpr uint32_t kTargetFlashAddr = kTargetFlashBase + 0x14u;
+  static constexpr uint32_t kTargetFlashModekeyr = kTargetFlashBase + 0x24u;
+  static constexpr uint32_t kTargetFlashStatBusy = 0x00000001u;
+  static constexpr uint32_t kTargetFlashStatWriteBusy = 0x00000002u;
+  static constexpr uint32_t kTargetFlashStatWriteProtectErr = 0x00000010u;
+  static constexpr uint32_t kTargetFlashStatEop = 0x00000020u;
+  static constexpr uint32_t kTargetFlashCtlStart = 0x00000040u;
+  static constexpr uint32_t kTargetFlashCtlLock = 0x00000080u;
+  static constexpr uint32_t kTargetFlashCtlFastLock = 0x00008000u;
+  static constexpr uint32_t kTargetFlashCtlPageProgram = 0x00010000u;
+  static constexpr uint32_t kTargetFlashCtlPageErase = 0x00020000u;
+  static constexpr uint32_t kTargetFlashCtlPageProgramStart = 0x00200000u;
+  static constexpr uint8_t kAttachRetryCount = 10u;
+  static constexpr uint32_t kAttachRetryDelayCycles = 60000u;
+  static constexpr uint8_t kAttachDmcontrolAddr = 0x10u;
+  static constexpr uint8_t kAttachDmstatusAddr = 0x11u;
+  static constexpr uint8_t kAttachAbstractcsAddr = 0x16u;
 
 #pragma pack(push, 1)
   struct WchLinkRvDescBlock
@@ -1849,6 +1991,7 @@ class WchLinkRvClass : public DeviceClass
   ProbeIdentity probe_id_{};
 
   SdiPort& sdi_;
+  RiscvDmiTarget<SdiPort> riscv_target_;
   LibXR::GPIO* nreset_gpio_ = nullptr;
 
   Endpoint::EPNumber command_ep_num_;
@@ -1861,6 +2004,15 @@ class WchLinkRvClass : public DeviceClass
 
   bool inited_ = false;
   uint8_t interface_num_ = 0u;
+
+  enum class SessionState : uint8_t
+  {
+    DISCONNECTED = 0u,
+    ACTIVE,
+    LINK_FAULT,
+  };
+
+  SessionState session_state_ = SessionState::DISCONNECTED;
 
   bool attached_ = false;
 
@@ -1892,22 +2044,23 @@ class WchLinkRvClass : public DeviceClass
   uint32_t flash_stream_next_ack_at_ = 0u;
   uint32_t flash_stream_write_addr_ = 0u;
   bool flash_stream_error_ = false;
+  uint32_t flash_page_buffer_addr_ = 0u;
+  bool flash_page_buffer_active_ = false;
+  bool flash_page_buffer_dirty_ = false;
+  std::array<uint8_t, kTargetFlashPageBytes> flash_page_buffer_ = {};
+  bool target_debug_session_active_ = false;
+  bool target_debug_session_needs_resume_ = false;
+  bool target_flash_fast_mode_ready_ = false;
   uint8_t pending_data_ack_ = 0u;
   bool data_ack_in_flight_ = false;
   bool read_stream_active_ = false;
-  bool read_stream_fault_latched_ = false;
-  bool read_stream_fault_pending_finalize_ = false;
   uint32_t read_stream_addr_ = 0u;
   uint32_t read_stream_remaining_ = 0u;
   bool read_stream_error_ = false;
 
-  std::array<uint8_t, 96> pending_cmd_buf_ = {};
-  uint16_t pending_cmd_len_ = 0u;
-  bool pending_cmd_valid_ = false;
-  uint8_t pending_cmd_overflow_count_ = 0u;
-  bool session_started_ = false;
-  bool data_in_recovery_pending_ = false;
-  uint8_t data_in_recovery_spins_ = 0u;
+  std::array<uint8_t, CMD_PACKET_SIZE> pending_cmd_resp_ = {};
+  uint16_t pending_cmd_resp_len_ = 0u;
+  bool pending_cmd_resp_valid_ = false;
 
   LibXR::Callback<LibXR::ConstRawData&> on_cmd_out_cb_ =
       LibXR::Callback<LibXR::ConstRawData&>::Create(OnCommandOutStatic, this);
