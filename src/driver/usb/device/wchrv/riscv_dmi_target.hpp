@@ -34,25 +34,25 @@ class RiscvDmiTarget
   ErrorCode DmiNop(uint8_t addr, uint32_t& data, LibXR::Debug::Sdi::Ack& ack)
   {
     LibXR::Debug::Sdi::Response resp = {};
-    const ErrorCode ec = sdi_.Transfer({addr, 0u, LibXR::Debug::Sdi::Op::NOP}, resp);
+    const ErrorCode RESULT = sdi_.Transfer({addr, 0u, LibXR::Debug::Sdi::Op::NOP}, resp);
     data = resp.data;
     ack = resp.ack;
-    return ec;
+    return RESULT;
   }
 
-  bool ReadDmStatus(uint32_t& dmstatus) { return DmiReadWord(kDmiDmstatus, dmstatus); }
+  bool ReadDmStatus(uint32_t& dmstatus) { return DmiReadWord(DMI_DMSTATUS, dmstatus); }
 
   bool ReadWordByAbstract(uint32_t addr, uint32_t& data)
   {
-    if (!DmiWriteWord(kDmiProgbuf0, 0x0002A303u))  // lw x6, 0(x5)
+    if (!DmiWriteWord(DMI_PROGBUF0, 0x0002A303u))  // lw x6, 0(x5)
     {
       return false;
     }
-    if (!DmiWriteWord(kDmiProgbuf1, 0x00100073u))  // ebreak
+    if (!DmiWriteWord(DMI_PROGBUF1, 0x00100073u))  // ebreak
     {
       return false;
     }
-    if (!DmiWriteWord(kDmiData0, addr))
+    if (!DmiWriteWord(DMI_DATA0, addr))
     {
       return false;
     }
@@ -68,21 +68,21 @@ class RiscvDmiTarget
     {
       return false;
     }
-    return DmiReadWord(kDmiData0, data);
+    return DmiReadWord(DMI_DATA0, data);
   }
 
   bool WriteWordByAbstract(uint32_t addr, uint32_t data)
   {
-    if (!DmiWriteWord(kDmiProgbuf0, 0x0072A023u))  // sw x7, 0(x5)
+    if (!DmiWriteWord(DMI_PROGBUF0, 0x0072A023u))  // sw x7, 0(x5)
     {
       return false;
     }
-    if (!DmiWriteWord(kDmiProgbuf1, 0x00100073u))  // ebreak
+    if (!DmiWriteWord(DMI_PROGBUF1, 0x00100073u))  // ebreak
     {
       return false;
     }
 
-    if (!DmiWriteWord(kDmiData0, addr))
+    if (!DmiWriteWord(DMI_DATA0, addr))
     {
       return false;
     }
@@ -95,7 +95,7 @@ class RiscvDmiTarget
       return false;
     }
 
-    if (!DmiWriteWord(kDmiData0, data))
+    if (!DmiWriteWord(DMI_DATA0, data))
     {
       return false;
     }
@@ -108,16 +108,16 @@ class RiscvDmiTarget
 
   bool WriteByteByAbstract(uint32_t addr, uint8_t data)
   {
-    if (!DmiWriteWord(kDmiProgbuf0, 0x00728023u))  // sb x7, 0(x5)
+    if (!DmiWriteWord(DMI_PROGBUF0, 0x00728023u))  // sb x7, 0(x5)
     {
       return false;
     }
-    if (!DmiWriteWord(kDmiProgbuf1, 0x00100073u))  // ebreak
+    if (!DmiWriteWord(DMI_PROGBUF1, 0x00100073u))  // ebreak
     {
       return false;
     }
 
-    if (!DmiWriteWord(kDmiData0, addr))
+    if (!DmiWriteWord(DMI_DATA0, addr))
     {
       return false;
     }
@@ -130,7 +130,7 @@ class RiscvDmiTarget
       return false;
     }
 
-    if (!DmiWriteWord(kDmiData0, static_cast<uint32_t>(data)))
+    if (!DmiWriteWord(DMI_DATA0, static_cast<uint32_t>(data)))
     {
       return false;
     }
@@ -153,7 +153,7 @@ class RiscvDmiTarget
     uint32_t chip_id = 0u;
     do
     {
-      if (!ReadWordByAbstract(kChipIdAddress, chip_id))
+      if (!ReadWordByAbstract(CHIP_ID_ADDRESS, chip_id))
       {
         ok = false;
         break;
@@ -167,19 +167,19 @@ class RiscvDmiTarget
       out.chip_id = chip_id;
 
       uint32_t flash_size = 0u;
-      if (ReadWordByAbstract(kFlashSizeAddress, flash_size))
+      if (ReadWordByAbstract(FLASH_SIZE_ADDRESS, flash_size))
       {
         out.flash_size_kb = static_cast<uint16_t>(flash_size & 0xFFFFu);
       }
 
       uint32_t uid0 = 0u;
-      if (ReadWordByAbstract(kUidWord0Address, uid0))
+      if (ReadWordByAbstract(UID_WORD0_ADDRESS, uid0))
       {
         out.uid_word0 = uid0;
       }
 
       uint32_t uid1 = 0u;
-      if (ReadWordByAbstract(kUidWord1Address, uid1))
+      if (ReadWordByAbstract(UID_WORD1_ADDRESS, uid1))
       {
         out.uid_word1 = uid1;
       }
@@ -213,25 +213,25 @@ class RiscvDmiTarget
   bool DmiReadWord(uint8_t addr, uint32_t& data)
   {
     LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
-    const ErrorCode ec = sdi_.DmiReadTxn(addr, data, ack);
-    return ec == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK;
+    const ErrorCode RESULT = sdi_.DmiReadTxn(addr, data, ack);
+    return RESULT == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK;
   }
 
   bool DmiWriteWord(uint8_t addr, uint32_t data)
   {
     LibXR::Debug::Sdi::Ack ack = LibXR::Debug::Sdi::Ack::PROTOCOL;
-    const ErrorCode ec = sdi_.DmiWriteTxn(addr, data, ack);
-    return ec == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK;
+    const ErrorCode RESULT = sdi_.DmiWriteTxn(addr, data, ack);
+    return RESULT == ErrorCode::OK && ack == LibXR::Debug::Sdi::Ack::OK;
   }
 
-  bool ClearAbstractCommandError() { return DmiWriteWord(kDmiAbstractcs, 0x00000700u); }
+  bool ClearAbstractCommandError() { return DmiWriteWord(DMI_ABSTRACTCS, 0x00000700u); }
 
   bool WaitAbstractCommandDone()
   {
     for (uint8_t i = 0u; i < 32u; ++i)
     {
       uint32_t abstractcs = 0u;
-      if (!DmiReadWord(kDmiAbstractcs, abstractcs))
+      if (!DmiReadWord(DMI_ABSTRACTCS, abstractcs))
       {
         return false;
       }
@@ -251,7 +251,7 @@ class RiscvDmiTarget
 
   bool RunAbstractCommand(uint32_t command)
   {
-    if (!DmiWriteWord(kDmiCommand, command))
+    if (!DmiWriteWord(DMI_COMMAND, command))
     {
       return false;
     }
@@ -262,7 +262,7 @@ class RiscvDmiTarget
   {
     need_resume = false;
     uint32_t dmstatus = 0u;
-    if (!DmiReadWord(kDmiDmstatus, dmstatus))
+    if (!DmiReadWord(DMI_DMSTATUS, dmstatus))
     {
       return false;
     }
@@ -271,20 +271,20 @@ class RiscvDmiTarget
       return true;
     }
 
-    if (!DmiWriteWord(kDmiDmcontrol, 0x80000001u))
+    if (!DmiWriteWord(DMI_DMCONTROL, 0x80000001u))
     {
       return false;
     }
 
     for (uint8_t i = 0u; i < 32u; ++i)
     {
-      if (!DmiReadWord(kDmiDmstatus, dmstatus))
+      if (!DmiReadWord(DMI_DMSTATUS, dmstatus))
       {
         return false;
       }
       if (IsDmHalted(dmstatus))
       {
-        if (!DmiWriteWord(kDmiDmcontrol, 0x00000001u))
+        if (!DmiWriteWord(DMI_DMCONTROL, 0x00000001u))
         {
           return false;
         }
@@ -302,11 +302,11 @@ class RiscvDmiTarget
       return;
     }
 
-    (void)DmiWriteWord(kDmiDmcontrol, 0x40000001u);
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x40000001u);
     for (uint8_t i = 0u; i < 16u; ++i)
     {
       uint32_t dmstatus = 0u;
-      if (!DmiReadWord(kDmiDmstatus, dmstatus))
+      if (!DmiReadWord(DMI_DMSTATUS, dmstatus))
       {
         break;
       }
@@ -315,21 +315,21 @@ class RiscvDmiTarget
         break;
       }
     }
-    (void)DmiWriteWord(kDmiDmcontrol, 0x00000001u);
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x00000001u);
   }
 
  private:
-  static constexpr uint8_t kDmiData0 = 0x04u;
-  static constexpr uint8_t kDmiDmcontrol = 0x10u;
-  static constexpr uint8_t kDmiDmstatus = 0x11u;
-  static constexpr uint8_t kDmiAbstractcs = 0x16u;
-  static constexpr uint8_t kDmiCommand = 0x17u;
-  static constexpr uint8_t kDmiProgbuf0 = 0x20u;
-  static constexpr uint8_t kDmiProgbuf1 = 0x21u;
-  static constexpr uint32_t kChipIdAddress = 0x1FFFF704u;
-  static constexpr uint32_t kFlashSizeAddress = 0x1FFFF7E0u;
-  static constexpr uint32_t kUidWord0Address = 0x1FFFF7E8u;
-  static constexpr uint32_t kUidWord1Address = 0x1FFFF7ECu;
+  static constexpr uint8_t DMI_DATA0 = 0x04u;
+  static constexpr uint8_t DMI_DMCONTROL = 0x10u;
+  static constexpr uint8_t DMI_DMSTATUS = 0x11u;
+  static constexpr uint8_t DMI_ABSTRACTCS = 0x16u;
+  static constexpr uint8_t DMI_COMMAND = 0x17u;
+  static constexpr uint8_t DMI_PROGBUF0 = 0x20u;
+  static constexpr uint8_t DMI_PROGBUF1 = 0x21u;
+  static constexpr uint32_t CHIP_ID_ADDRESS = 0x1FFFF704u;
+  static constexpr uint32_t FLASH_SIZE_ADDRESS = 0x1FFFF7E0u;
+  static constexpr uint32_t UID_WORD0_ADDRESS = 0x1FFFF7E8u;
+  static constexpr uint32_t UID_WORD1_ADDRESS = 0x1FFFF7ECu;
 
   SdiPort& sdi_;
 };
