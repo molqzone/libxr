@@ -88,8 +88,8 @@ class WchLinkRvClass : public DeviceClass
     ep_data_out_->SetActiveLength(0u);
     ep_data_in_->SetActiveLength(0u);
 
-    const uint16_t CMD_OUT_MPS = SelectBulkPacketSize(ep_cmd_out_);
-    const uint16_t CMD_IN_MPS = SelectBulkPacketSize(ep_cmd_in_);
+    const uint16_t CMD_OUT_MPS = CMD_PACKET_SIZE;
+    const uint16_t CMD_IN_MPS = CMD_PACKET_SIZE;
     const uint16_t DATA_OUT_MPS = SelectBulkPacketSize(ep_data_out_);
     const uint16_t DATA_IN_MPS = SelectBulkPacketSize(ep_data_in_);
 
@@ -324,6 +324,7 @@ class WchLinkRvClass : public DeviceClass
     read_region_addr_ = 0u;
     read_region_len_ = 0u;
     current_sdi_clock_hz_ = SDI_CLOCK_HZ_HIGH;
+    requested_chip_family_ = 0u;
     program_mode_ = ProgramMode::IDLE;
     flash_op_ready_ = false;
     flash_op_rx_bytes_ = 0u;
@@ -333,13 +334,8 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_next_ack_at_ = 0u;
     flash_stream_write_addr_ = 0u;
     flash_stream_error_ = false;
-    flash_page_buffer_addr_ = 0u;
-    flash_page_buffer_active_ = false;
-    flash_page_buffer_dirty_ = false;
-    flash_page_buffer_.fill(0xFFu);
     target_debug_session_active_ = false;
     target_debug_session_needs_resume_ = false;
-    target_flash_fast_mode_ready_ = false;
     pending_data_ack_ = 0u;
     data_ack_in_flight_ = false;
     read_stream_active_ = false;
@@ -382,66 +378,6 @@ class WchLinkRvClass : public DeviceClass
     }
   }
 
-  static uint32_t DecodeWritePackBytes(uint8_t chip_family)
-  {
-    switch (chip_family)
-    {
-      case 0x09u:
-      case 0x0Au:
-        return 1024u;
-      default:
-        return DEFAULT_WRITE_PACK_SIZE;
-    }
-  }
-
-  static bool IsFlashOpLengthValid(uint8_t chip_family, uint32_t bytes)
-  {
-    // Length table is derived from wlink flash_op defaults (and known alt
-    // variants) to guard program stage 0x07/0x0B against partial/garbled EP2
-    // payloads.
-    switch (chip_family)
-    {
-      case 0x01u:  // CH32V103
-        return MatchFlashOpLengthWithPadding(bytes, 494u);
-      case 0x02u:  // CH57X
-        return MatchFlashOpLengthWithPadding(bytes, 1102u);
-      case 0x03u:  // CH56X
-        return MatchFlashOpLengthWithPadding(bytes, 1156u);
-      case 0x05u:  // CH32V20X
-      case 0x06u:  // CH32V30X
-        return MatchFlashOpLengthWithPadding(bytes, 446u);
-      case 0x07u:  // CH582/583
-      case 0x0Bu:  // CH59X
-      case 0x4Bu:  // CH585
-        return MatchFlashOpLengthWithPadding(bytes, 1326u);
-      case 0x09u:  // CH32V003
-      case 0x49u:  // CH641
-        return MatchFlashOpLengthWithPadding(bytes, 498u) ||
-               MatchFlashOpLengthWithPadding(bytes, 466u);
-      case 0x0Au:  // CH8571
-        return MatchFlashOpLengthWithPadding(bytes, 1408u) ||
-               MatchFlashOpLengthWithPadding(bytes, 1386u);
-      case 0x0Cu:  // CH643
-      case 0x0Du:  // CH32X035
-        return MatchFlashOpLengthWithPadding(bytes, 488u);
-      case 0x0Eu:  // CH32L103
-        return MatchFlashOpLengthWithPadding(bytes, 512u);
-      case 0x0Fu:  // CH564
-        return MatchFlashOpLengthWithPadding(bytes, 1532u);
-      case 0x4Eu:  // CH32V007
-        return MatchFlashOpLengthWithPadding(bytes, 500u);
-      case 0x46u:  // CH645
-        return MatchFlashOpLengthWithPadding(bytes, 440u) ||
-               MatchFlashOpLengthWithPadding(bytes, 486u);
-      case 0x86u:  // CH32V317
-        return MatchFlashOpLengthWithPadding(bytes, 440u) ||
-               MatchFlashOpLengthWithPadding(bytes, 460u);
-      default:
-        // Unknown family: keep compatibility, but still reject empty flash-op.
-        return bytes > 0u;
-    }
-  }
-
   static uint32_t RoundUpU32(uint32_t value, uint32_t align)
   {
     if (align == 0u)
@@ -450,23 +386,6 @@ class WchLinkRvClass : public DeviceClass
     }
     const uint32_t REMAINDER = value % align;
     return (REMAINDER == 0u) ? value : (value + align - REMAINDER);
-  }
-
-  static bool MatchFlashOpLengthWithPadding(uint32_t actual_bytes, uint32_t logical_bytes)
-  {
-    if (logical_bytes == 0u)
-    {
-      return false;
-    }
-    if (actual_bytes == logical_bytes)
-    {
-      return true;
-    }
-
-    // wlink sends flash-op payloads over EP2 in 256-byte chunks and pads the
-    // final chunk with trailing zeroes. Accept the transport-sized length while
-    // still rejecting unrelated payload sizes.
-    return actual_bytes == RoundUpU32(logical_bytes, 256u);
   }
 
   static uint32_t MinU32(uint32_t a, uint32_t b) { return (a < b) ? a : b; }
@@ -693,8 +612,7 @@ class WchLinkRvClass : public DeviceClass
     }
   }
 
-  bool TryAttachTarget(typename RiscvDmiTarget<SdiPort>::ProbeData& probe_data,
-                       AttachFailureStage& failure_stage)
+  bool TryAttachTarget(uint32_t& chip_id, AttachFailureStage& failure_stage)
   {
     if (!ActivateDebugModule())
     {
@@ -715,9 +633,16 @@ class WchLinkRvClass : public DeviceClass
       return false;
     }
 
-    const bool PROBE_OK =
-        riscv_target_.ProbeChipIdentity(probe_data) || riscv_target_.ProbeChipIdentity(probe_data);
-    if (!PROBE_OK || probe_data.chip_id == 0u || probe_data.chip_id == 0xFFFFFFFFu)
+    chip_id = 0u;
+    for (uint8_t attempt = 0u; attempt < 2u; ++attempt)
+    {
+      if (riscv_target_.ReadWordWithTemporaryHalt(TARGET_CHIP_ID_ADDR, chip_id) && chip_id != 0u &&
+          chip_id != 0xFFFFFFFFu)
+      {
+        return true;
+      }
+    }
+    if (chip_id == 0u || chip_id == 0xFFFFFFFFu)
     {
       failure_stage = AttachFailureStage::CHIP_ID;
       return false;
@@ -777,21 +702,7 @@ class WchLinkRvClass : public DeviceClass
     return ErrorCode::OK;
   }
 
-  uint8_t ActiveChipFamily() const
-  {
-    if (requested_chip_family_ != 0u)
-    {
-      return requested_chip_family_;
-    }
-    return probe_id_.chip_family;
-  }
-
-  void ClearHostSelectedChipFamily()
-  {
-    requested_chip_family_ = 0u;
-    chip_family_selected_by_speed_ = false;
-    chip_family_selected_for_next_attach_ = false;
-  }
+  void ClearHostSelectedChipFamily() { requested_chip_family_ = 0u; }
 
   void HandleReadStreamLinkFault(bool /*defer_data_in_finalize*/ = false)
   {
@@ -861,10 +772,6 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_next_ack_at_ = 0u;
     flash_stream_write_addr_ = 0u;
     flash_stream_error_ = false;
-    flash_page_buffer_addr_ = 0u;
-    flash_page_buffer_active_ = false;
-    flash_page_buffer_dirty_ = false;
-    flash_page_buffer_.fill(0xFFu);
     pending_data_ack_ = 0u;
     data_ack_in_flight_ = false;
     ArmDataOutForStreamIfIdle();
@@ -880,10 +787,6 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_next_ack_at_ = 0u;
     flash_stream_write_addr_ = 0u;
     flash_stream_error_ = false;
-    flash_page_buffer_addr_ = 0u;
-    flash_page_buffer_active_ = false;
-    flash_page_buffer_dirty_ = false;
-    flash_page_buffer_.fill(0xFFu);
     pending_data_ack_ = 0u;
     data_ack_in_flight_ = false;
   }
@@ -901,19 +804,13 @@ class WchLinkRvClass : public DeviceClass
       return false;
     }
 
-    // Host-side wlink streams flash payloads over EP2 in 256-byte packets and
-    // waits for an EP2-IN ack after each packet, even when the logical write
-    // pack size is 4096 bytes. Keep the ack cadence aligned with the transport
-    // packet size to avoid host/device deadlock mid-programming.
-    flash_stream_chunk_bytes_ = FLASH_STREAM_ACK_BYTES;
+    // OpenOCD wlink batches flash payloads in 4 KiB program transactions and
+    // only drains one EP2-IN completion frame after each batch.
+    flash_stream_chunk_bytes_ = DEFAULT_WRITE_PACK_SIZE;
     flash_stream_rx_bytes_ = 0u;
     flash_stream_next_ack_at_ = MinU32(flash_stream_chunk_bytes_, flash_stream_total_raw_bytes_);
     flash_stream_write_addr_ = write_region_addr_;
     flash_stream_error_ = false;
-    flash_page_buffer_addr_ = 0u;
-    flash_page_buffer_active_ = false;
-    flash_page_buffer_dirty_ = false;
-    flash_page_buffer_.fill(0xFFu);
     pending_data_ack_ = 0u;
     program_mode_ = ProgramMode::WRITE_FLASH_STREAM;
     ArmDataOutForStreamIfIdle();
@@ -983,11 +880,6 @@ class WchLinkRvClass : public DeviceClass
       return true;
     }
 
-    if (ActiveChipFamily() == 0x05u)
-    {
-      return WriteFlashStreamChunkV20x(data, size);
-    }
-
     uint32_t off = 0u;
     while (off < size)
     {
@@ -1014,96 +906,6 @@ class WchLinkRvClass : public DeviceClass
     return true;
   }
 
-  bool WriteFlashStreamChunkV20x(const uint8_t* data, uint32_t size)
-  {
-    if (!EnsureTargetFlashWriteSession())
-    {
-      return false;
-    }
-
-    uint32_t off = 0u;
-    while (off < size)
-    {
-      const uint32_t PAGE_ADDR = AlignDownU32(flash_stream_write_addr_, TARGET_FLASH_PAGE_BYTES);
-      if (!flash_page_buffer_active_)
-      {
-        BeginFlashPageBuffer(PAGE_ADDR);
-      }
-      else if (flash_page_buffer_addr_ != PAGE_ADDR)
-      {
-        if (!FlushFlashPageBuffer())
-        {
-          return false;
-        }
-        BeginFlashPageBuffer(PAGE_ADDR);
-      }
-
-      const uint32_t PAGE_OFFSET = flash_stream_write_addr_ - flash_page_buffer_addr_;
-      const uint32_t CHUNK_BYTES = MinU32(size - off, TARGET_FLASH_PAGE_BYTES - PAGE_OFFSET);
-      std::memcpy(flash_page_buffer_.data() + PAGE_OFFSET, data + off, CHUNK_BYTES);
-      flash_page_buffer_dirty_ = true;
-      flash_stream_write_addr_ += CHUNK_BYTES;
-      off += CHUNK_BYTES;
-
-      if ((PAGE_OFFSET + CHUNK_BYTES) >= TARGET_FLASH_PAGE_BYTES)
-      {
-        if (!FlushFlashPageBuffer())
-        {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  }
-
-  void BeginFlashPageBuffer(uint32_t page_addr)
-  {
-    flash_page_buffer_addr_ = page_addr;
-    flash_page_buffer_active_ = true;
-    flash_page_buffer_dirty_ = false;
-    flash_page_buffer_.fill(0xFFu);
-  }
-
-  bool FlushFlashPageBuffer()
-  {
-    if (!flash_page_buffer_active_)
-    {
-      return true;
-    }
-
-    const bool SHOULD_PROGRAM = flash_page_buffer_dirty_;
-    const uint32_t PAGE_ADDR = flash_page_buffer_addr_;
-    flash_page_buffer_active_ = false;
-    flash_page_buffer_dirty_ = false;
-
-    if (!SHOULD_PROGRAM)
-    {
-      return true;
-    }
-
-    if (!EraseFlashPage256(PAGE_ADDR))
-    {
-      return false;
-    }
-    if (!ProgramFlashPage256(PAGE_ADDR, flash_page_buffer_))
-    {
-      return false;
-    }
-
-    flash_page_buffer_.fill(0xFFu);
-    return true;
-  }
-
-  bool FinalizeFlashWriteStream()
-  {
-    if (ActiveChipFamily() != 0x05u)
-    {
-      return true;
-    }
-    return FlushFlashPageBuffer();
-  }
-
   bool EnsureTargetDebugSession()
   {
     if (target_debug_session_active_)
@@ -1123,186 +925,12 @@ class WchLinkRvClass : public DeviceClass
 
   void EndTargetDebugSession()
   {
-    if (target_flash_fast_mode_ready_)
-    {
-      (void)WriteTargetFlashRegisterOr(TARGET_FLASH_CTLR, TARGET_FLASH_CTL_LOCK | TARGET_FLASH_CTL_FAST_LOCK);
-      target_flash_fast_mode_ready_ = false;
-    }
-
     if (target_debug_session_active_)
     {
       riscv_target_.EndHartHaltSession(target_debug_session_needs_resume_);
       target_debug_session_active_ = false;
       target_debug_session_needs_resume_ = false;
     }
-  }
-
-  bool EnsureTargetFlashWriteSession()
-  {
-    if (!EnsureTargetDebugSession())
-    {
-      return false;
-    }
-
-    if (target_flash_fast_mode_ready_)
-    {
-      return true;
-    }
-
-    if (!WriteTargetFlashRegister(TARGET_FLASH_KEYR, TARGET_FLASH_KEY1) ||
-        !WriteTargetFlashRegister(TARGET_FLASH_KEYR, TARGET_FLASH_KEY2) ||
-        !WriteTargetFlashRegister(TARGET_FLASH_MODEKEYR, TARGET_FLASH_KEY1) ||
-        !WriteTargetFlashRegister(TARGET_FLASH_MODEKEYR, TARGET_FLASH_KEY2))
-    {
-      return false;
-    }
-
-    target_flash_fast_mode_ready_ = true;
-    return ClearTargetFlashFlags();
-  }
-
-  bool WriteTargetFlashRegister(uint32_t addr, uint32_t value)
-  {
-    return riscv_target_.WriteWordByAbstract(addr, value);
-  }
-
-  bool ReadTargetFlashRegister(uint32_t addr, uint32_t& value)
-  {
-    return riscv_target_.ReadWordByAbstract(addr, value);
-  }
-
-  bool WriteTargetFlashRegisterOr(uint32_t addr, uint32_t bits)
-  {
-    uint32_t value = 0u;
-    if (!ReadTargetFlashRegister(addr, value))
-    {
-      return false;
-    }
-    return WriteTargetFlashRegister(addr, value | bits);
-  }
-
-  bool WriteTargetFlashRegisterAnd(uint32_t addr, uint32_t bits_to_clear)
-  {
-    uint32_t value = 0u;
-    if (!ReadTargetFlashRegister(addr, value))
-    {
-      return false;
-    }
-    return WriteTargetFlashRegister(addr, value & ~bits_to_clear);
-  }
-
-  bool ClearTargetFlashFlags()
-  {
-    return WriteTargetFlashRegister(TARGET_FLASH_STATR,
-                                    TARGET_FLASH_STAT_WRITE_PROTECT_ERR | TARGET_FLASH_STAT_EOP);
-  }
-
-  bool WaitTargetFlashIdle(uint32_t mask, uint16_t retries = 512u)
-  {
-    for (uint16_t i = 0u; i < retries; ++i)
-    {
-      uint32_t statr = 0u;
-      if (!ReadTargetFlashRegister(TARGET_FLASH_STATR, statr))
-      {
-        return false;
-      }
-      if ((statr & mask) == 0u)
-      {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool CheckTargetFlashError()
-  {
-    uint32_t statr = 0u;
-    if (!ReadTargetFlashRegister(TARGET_FLASH_STATR, statr))
-    {
-      return false;
-    }
-    return (statr & TARGET_FLASH_STAT_WRITE_PROTECT_ERR) == 0u;
-  }
-
-  bool EraseFlashPage256(uint32_t page_addr)
-  {
-    if (!ClearTargetFlashFlags())
-    {
-      return false;
-    }
-    if (!WriteTargetFlashRegisterOr(TARGET_FLASH_CTLR, TARGET_FLASH_CTL_PAGE_ERASE))
-    {
-      return false;
-    }
-    if (!WriteTargetFlashRegister(TARGET_FLASH_ADDR, AlignDownU32(page_addr, TARGET_FLASH_PAGE_BYTES)))
-    {
-      return false;
-    }
-    if (!WriteTargetFlashRegisterOr(TARGET_FLASH_CTLR, TARGET_FLASH_CTL_START))
-    {
-      return false;
-    }
-    if (!WaitTargetFlashIdle(TARGET_FLASH_STAT_BUSY))
-    {
-      return false;
-    }
-    if (!WriteTargetFlashRegisterAnd(TARGET_FLASH_CTLR, TARGET_FLASH_CTL_PAGE_ERASE))
-    {
-      return false;
-    }
-    if (!CheckTargetFlashError())
-    {
-      (void)ClearTargetFlashFlags();
-      return false;
-    }
-    return ClearTargetFlashFlags();
-  }
-
-  bool ProgramFlashPage256(uint32_t page_addr, const std::array<uint8_t, 256u>& page)
-  {
-    if (!ClearTargetFlashFlags())
-    {
-      return false;
-    }
-    if (!WriteTargetFlashRegisterOr(TARGET_FLASH_CTLR, TARGET_FLASH_CTL_PAGE_PROGRAM))
-    {
-      return false;
-    }
-    if (!WaitTargetFlashIdle(TARGET_FLASH_STAT_BUSY | TARGET_FLASH_STAT_WRITE_BUSY))
-    {
-      return false;
-    }
-
-    for (uint32_t off = 0u; off < TARGET_FLASH_PAGE_BYTES; off += 4u)
-    {
-      if (!riscv_target_.WriteWordByAbstract(page_addr + off, LoadLe32(page.data() + off)))
-      {
-        return false;
-      }
-      if (!WaitTargetFlashIdle(TARGET_FLASH_STAT_WRITE_BUSY))
-      {
-        return false;
-      }
-    }
-
-    if (!WriteTargetFlashRegisterOr(TARGET_FLASH_CTLR, TARGET_FLASH_CTL_PAGE_PROGRAM_START))
-    {
-      return false;
-    }
-    if (!WaitTargetFlashIdle(TARGET_FLASH_STAT_BUSY))
-    {
-      return false;
-    }
-    if (!WriteTargetFlashRegisterAnd(TARGET_FLASH_CTLR, TARGET_FLASH_CTL_PAGE_PROGRAM))
-    {
-      return false;
-    }
-    if (!CheckTargetFlashError())
-    {
-      (void)ClearTargetFlashFlags();
-      return false;
-    }
-    return ClearTargetFlashFlags();
   }
 
   bool EnterReadStream(uint32_t addr, uint32_t len)
@@ -1424,11 +1052,11 @@ class WchLinkRvClass : public DeviceClass
 
     resp[0] = 0xFFu;
     resp[1] = 0xFFu;
-    resp[2] = static_cast<uint8_t>(esig_flash_size_kb_ >> 8u);
-    resp[3] = static_cast<uint8_t>(esig_flash_size_kb_);
-    StoreBe32(resp + 4u, esig_uid_word0_);
-    StoreBe32(resp + 8u, esig_uid_word1_);
-    StoreBe32(resp + 12u, esig_reserved_word_);
+    resp[2] = 0x00u;
+    resp[3] = 0x00u;
+    StoreBe32(resp + 4u, 0u);
+    StoreBe32(resp + 8u, 0u);
+    StoreBe32(resp + 12u, 0xFFFFFFFFu);
     StoreBe32(resp + 16u, probe_id_.chip_id);
     out_len = 20u;
     return ErrorCode::OK;
@@ -1452,7 +1080,7 @@ class WchLinkRvClass : public DeviceClass
     {
       attached_ = false;
       EndTargetDebugSession();
-      typename RiscvDmiTarget<SdiPort>::ProbeData probe_data = {};
+      uint32_t chip_id = 0u;
       bool attach_ok = false;
       AttachFailureStage last_failure_stage = AttachFailureStage::ENTER_SDI;
       for (uint8_t attempt = 0u; attempt < ATTACH_RETRY_COUNT; ++attempt)
@@ -1468,7 +1096,7 @@ class WchLinkRvClass : public DeviceClass
           continue;
         }
 
-        if (TryAttachTarget(probe_data, last_failure_stage))
+        if (TryAttachTarget(chip_id, last_failure_stage))
         {
           attach_ok = true;
           break;
@@ -1480,32 +1108,20 @@ class WchLinkRvClass : public DeviceClass
         sdi_.Close();
         session_state_ = SessionState::LINK_FAULT;
         probe_id_.chip_id = 0u;
-        esig_flash_size_kb_ = 0u;
-        esig_uid_word0_ = 0u;
-        esig_uid_word1_ = 0u;
         return BuildErrorResponse(AttachFailureReasonCode(last_failure_stage), resp, cap, out_len);
       }
 
-      probe_id_.chip_id = probe_data.chip_id;
-      esig_flash_size_kb_ = probe_data.flash_size_kb;
-      esig_uid_word0_ = probe_data.uid_word0;
-      esig_uid_word1_ = probe_data.uid_word1;
+      probe_id_.chip_id = chip_id;
 
       uint8_t chip_family = DetectChipFamilyFromChipId(probe_id_.chip_id);
-      if (chip_family == 0u && requested_chip_family_ != 0u && requested_chip_family_ != 0x01u)
+      if (chip_family == 0u && requested_chip_family_ != 0u)
       {
         chip_family = requested_chip_family_;
-      }
-      if (chip_family == 0u && probe_id_.chip_family != 0u && probe_id_.chip_family != 0x01u)
-      {
-        chip_family = probe_id_.chip_family;
       }
       probe_id_.chip_family = chip_family;
 
       attached_ = true;
       session_state_ = SessionState::ACTIVE;
-      // Consume a host-selected family only after a successful attach.
-      chip_family_selected_for_next_attach_ = false;
 
       const uint8_t ATTACH_INFO[5] = {
           probe_id_.chip_family,
@@ -1631,8 +1247,7 @@ class WchLinkRvClass : public DeviceClass
     {
       // Protocol sequence from analysis:
       // 0x05 -> EP2 flash-op bytes -> 0x07/0x0B.
-      if (program_mode_ != ProgramMode::WRITE_FLASH_OP ||
-          !IsFlashOpLengthValid(ActiveChipFamily(), flash_op_rx_bytes_))
+      if (program_mode_ != ProgramMode::WRITE_FLASH_OP || flash_op_rx_bytes_ == 0u)
       {
         return BuildErrorResponse(0x55u, resp, cap, out_len);
       }
@@ -1657,7 +1272,6 @@ class WchLinkRvClass : public DeviceClass
       FlushPendingDataAck();
       // Program End must arrive after the full write-region payload is streamed.
       if (program_mode_ != ProgramMode::WRITE_FLASH_STREAM || !IsFlashWriteFinished() ||
-          !FinalizeFlashWriteStream() ||
           PendingDataAckBacklog() != 0u || flash_stream_error_)
       {
         return BuildErrorResponse(0x55u, resp, cap, out_len);
@@ -1747,8 +1361,6 @@ class WchLinkRvClass : public DeviceClass
         {
           current_sdi_clock_hz_ = CLOCK_HZ;
           requested_chip_family_ = REQUESTED_CHIP_FAMILY;
-          chip_family_selected_by_speed_ = (requested_chip_family_ != 0u);
-          chip_family_selected_for_next_attach_ = chip_family_selected_by_speed_;
         }
         const uint8_t STATUS_PAYLOAD[1] = {
             static_cast<uint8_t>(CLOCK_SET_OK ? 0x01u : 0x00u)};
@@ -1955,29 +1567,10 @@ class WchLinkRvClass : public DeviceClass
   static constexpr uint16_t BULK_MPS_HS = 512u;
   static constexpr std::array<uint8_t, 4> DATA_ACK_FRAME = {0x41u, 0x01u, 0x01u, 0x04u};
   static constexpr uint32_t DEFAULT_WRITE_PACK_SIZE = 4096u;
-  static constexpr uint32_t FLASH_STREAM_ACK_BYTES = 256u;
   static constexpr uint32_t SDI_CLOCK_HZ_LOW = 5'000u;
   static constexpr uint32_t SDI_CLOCK_HZ_MEDIUM = 10'000u;
   static constexpr uint32_t SDI_CLOCK_HZ_HIGH = 20'000u;
-  static constexpr uint32_t TARGET_FLASH_PAGE_BYTES = 256u;
-  static constexpr uint32_t TARGET_FLASH_KEY1 = 0x45670123u;
-  static constexpr uint32_t TARGET_FLASH_KEY2 = 0xCDEF89ABu;
-  static constexpr uint32_t TARGET_FLASH_BASE = 0x40022000u;
-  static constexpr uint32_t TARGET_FLASH_KEYR = TARGET_FLASH_BASE + 0x04u;
-  static constexpr uint32_t TARGET_FLASH_STATR = TARGET_FLASH_BASE + 0x0Cu;
-  static constexpr uint32_t TARGET_FLASH_CTLR = TARGET_FLASH_BASE + 0x10u;
-  static constexpr uint32_t TARGET_FLASH_ADDR = TARGET_FLASH_BASE + 0x14u;
-  static constexpr uint32_t TARGET_FLASH_MODEKEYR = TARGET_FLASH_BASE + 0x24u;
-  static constexpr uint32_t TARGET_FLASH_STAT_BUSY = 0x00000001u;
-  static constexpr uint32_t TARGET_FLASH_STAT_WRITE_BUSY = 0x00000002u;
-  static constexpr uint32_t TARGET_FLASH_STAT_WRITE_PROTECT_ERR = 0x00000010u;
-  static constexpr uint32_t TARGET_FLASH_STAT_EOP = 0x00000020u;
-  static constexpr uint32_t TARGET_FLASH_CTL_START = 0x00000040u;
-  static constexpr uint32_t TARGET_FLASH_CTL_LOCK = 0x00000080u;
-  static constexpr uint32_t TARGET_FLASH_CTL_FAST_LOCK = 0x00008000u;
-  static constexpr uint32_t TARGET_FLASH_CTL_PAGE_PROGRAM = 0x00010000u;
-  static constexpr uint32_t TARGET_FLASH_CTL_PAGE_ERASE = 0x00020000u;
-  static constexpr uint32_t TARGET_FLASH_CTL_PAGE_PROGRAM_START = 0x00200000u;
+  static constexpr uint32_t TARGET_CHIP_ID_ADDR = 0x1FFFF704u;
   static constexpr uint8_t ATTACH_RETRY_COUNT = 10u;
   static constexpr uint32_t ATTACH_RETRY_DELAY_CYCLES = 60000u;
   static constexpr uint8_t ATTACH_DMCONTROL_ADDR = 0x10u;
@@ -2035,13 +1628,7 @@ class WchLinkRvClass : public DeviceClass
   uint32_t read_region_addr_ = 0u;
   uint32_t read_region_len_ = 0u;
   uint32_t current_sdi_clock_hz_ = SDI_CLOCK_HZ_HIGH;
-  uint16_t esig_flash_size_kb_ = 0u;
-  uint32_t esig_uid_word0_ = 0u;
-  uint32_t esig_uid_word1_ = 0u;
-  uint32_t esig_reserved_word_ = 0xFFFFFFFFu;
   uint8_t requested_chip_family_ = 0u;
-  bool chip_family_selected_by_speed_ = false;
-  bool chip_family_selected_for_next_attach_ = false;
   ProgramMode program_mode_ = ProgramMode::IDLE;
   bool flash_op_ready_ = false;
   uint32_t flash_op_rx_bytes_ = 0u;
@@ -2051,13 +1638,8 @@ class WchLinkRvClass : public DeviceClass
   uint32_t flash_stream_next_ack_at_ = 0u;
   uint32_t flash_stream_write_addr_ = 0u;
   bool flash_stream_error_ = false;
-  uint32_t flash_page_buffer_addr_ = 0u;
-  bool flash_page_buffer_active_ = false;
-  bool flash_page_buffer_dirty_ = false;
-  std::array<uint8_t, TARGET_FLASH_PAGE_BYTES> flash_page_buffer_ = {};
   bool target_debug_session_active_ = false;
   bool target_debug_session_needs_resume_ = false;
-  bool target_flash_fast_mode_ready_ = false;
   uint8_t pending_data_ack_ = 0u;
   bool data_ack_in_flight_ = false;
   bool read_stream_active_ = false;

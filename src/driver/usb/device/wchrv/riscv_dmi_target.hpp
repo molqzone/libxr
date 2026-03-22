@@ -11,14 +11,6 @@ template <typename SdiPort>
 class RiscvDmiTarget
 {
  public:
-  struct ProbeData
-  {
-    uint32_t chip_id = 0u;
-    uint16_t flash_size_kb = 0u;
-    uint32_t uid_word0 = 0u;
-    uint32_t uid_word1 = 0u;
-  };
-
   explicit RiscvDmiTarget(SdiPort& sdi_link) : sdi_(sdi_link) {}
 
   ErrorCode DmiRead(uint8_t addr, uint32_t& data, LibXR::Debug::Sdi::Ack& ack)
@@ -141,7 +133,7 @@ class RiscvDmiTarget
     return RunAbstractCommand(0x00271007u);  // x7 <- data0 with postexec
   }
 
-  bool ProbeChipIdentity(ProbeData& out)
+  bool ReadWordWithTemporaryHalt(uint32_t addr, uint32_t& data)
   {
     bool need_resume = false;
     if (!EnsureHartHaltedForProbe(need_resume))
@@ -149,44 +141,9 @@ class RiscvDmiTarget
       return false;
     }
 
-    bool ok = true;
-    uint32_t chip_id = 0u;
-    do
-    {
-      if (!ReadWordByAbstract(CHIP_ID_ADDRESS, chip_id))
-      {
-        ok = false;
-        break;
-      }
-      if (chip_id == 0u || chip_id == 0xFFFFFFFFu)
-      {
-        ok = false;
-        break;
-      }
-
-      out.chip_id = chip_id;
-
-      uint32_t flash_size = 0u;
-      if (ReadWordByAbstract(FLASH_SIZE_ADDRESS, flash_size))
-      {
-        out.flash_size_kb = static_cast<uint16_t>(flash_size & 0xFFFFu);
-      }
-
-      uint32_t uid0 = 0u;
-      if (ReadWordByAbstract(UID_WORD0_ADDRESS, uid0))
-      {
-        out.uid_word0 = uid0;
-      }
-
-      uint32_t uid1 = 0u;
-      if (ReadWordByAbstract(UID_WORD1_ADDRESS, uid1))
-      {
-        out.uid_word1 = uid1;
-      }
-    } while (false);
-
+    const bool READ_OK = ReadWordByAbstract(addr, data);
     TryResumeHartAfterProbe(need_resume);
-    return ok;
+    return READ_OK;
   }
 
   bool BeginHartHaltSession(bool& need_resume)
@@ -326,10 +283,6 @@ class RiscvDmiTarget
   static constexpr uint8_t DMI_COMMAND = 0x17u;
   static constexpr uint8_t DMI_PROGBUF0 = 0x20u;
   static constexpr uint8_t DMI_PROGBUF1 = 0x21u;
-  static constexpr uint32_t CHIP_ID_ADDRESS = 0x1FFFF704u;
-  static constexpr uint32_t FLASH_SIZE_ADDRESS = 0x1FFFF7E0u;
-  static constexpr uint32_t UID_WORD0_ADDRESS = 0x1FFFF7E8u;
-  static constexpr uint32_t UID_WORD1_ADDRESS = 0x1FFFF7ECu;
 
   SdiPort& sdi_;
 };
