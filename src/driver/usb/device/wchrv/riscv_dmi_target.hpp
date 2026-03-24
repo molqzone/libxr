@@ -58,9 +58,11 @@ class RiscvDmiTarget
     uint8_t a0_valid = 0u;
     uint32_t dmstatus_before_resume = 0u;
     uint32_t dmstatus_after_resume = 0u;
+    uint32_t dmstatus_timeout_last = 0u;
     uint32_t dmstatus_after_halt = 0u;
     uint32_t dmcontrol_after_resume = 0u;
     uint32_t a0_result = 0u;
+    uint32_t dcsr = 0u;
     uint32_t dpc = 0u;
     uint32_t mepc = 0u;
     uint32_t mcause = 0u;
@@ -393,11 +395,16 @@ class RiscvDmiTarget
 
   void EndMemoryWriteSession()
   {
-    if (memory_write_session_.active && memory_write_session_.autoexec_enabled)
+    // Always restore ABSTRACTAUTO so a stale autoexec bit left by an earlier
+    // session cannot poison later abstract reads on a fresh probe attach.
+    uint32_t restored_abstractauto = 0u;
+    if (memory_write_session_.active)
     {
-      (void)DmiWriteWord(DMI_ABSTRACTAUTO, memory_write_session_.abstractauto_saved);
+      restored_abstractauto = memory_write_session_.abstractauto_saved;
     }
+    (void)DmiWriteWord(DMI_ABSTRACTAUTO, restored_abstractauto);
     memory_write_session_ = {};
+    (void)ClearAbstractCommandError();
   }
 
   bool WriteMemoryBlock(uint32_t addr, const uint8_t* data, uint32_t len)
@@ -536,6 +543,10 @@ class RiscvDmiTarget
       debug_snapshot->hart_halted_seen = 1u;
 
       uint32_t reg_value = 0u;
+      if (ReadCpuRegister(kRegDcsr, reg_value))
+      {
+        debug_snapshot->dcsr = reg_value;
+      }
       if (ReadCpuRegister(kRegA0, reg_value))
       {
         debug_snapshot->a0_result = reg_value;
@@ -654,6 +665,7 @@ class RiscvDmiTarget
       record_failure(RunProgramFailureStage::WAIT_HALT);
       if (debug_snapshot)
       {
+        debug_snapshot->dmstatus_timeout_last = dmstatus_after_halt;
         debug_snapshot->dmstatus_after_halt = dmstatus_after_halt;
         if (IsDmStatusResumeAck(dmstatus_after_halt))
         {
@@ -672,11 +684,17 @@ class RiscvDmiTarget
 
     if (debug_snapshot)
     {
+      debug_snapshot->dmstatus_timeout_last = dmstatus_after_halt;
       debug_snapshot->dmstatus_after_halt = dmstatus_after_halt;
       debug_snapshot->hart_halted_seen = 1u;
       if (IsDmStatusResumeAck(dmstatus_after_halt))
       {
         debug_snapshot->resume_ack_seen = 1u;
+      }
+      uint32_t reg_value = 0u;
+      if (ReadCpuRegister(kRegDcsr, reg_value))
+      {
+        debug_snapshot->dcsr = reg_value;
       }
     }
 

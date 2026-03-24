@@ -50,9 +50,11 @@ class WchLinkRvClass : public DeviceClass
     uint8_t a0_valid = 0u;
     uint32_t dmstatus_before_resume = 0u;
     uint32_t dmstatus_after_resume = 0u;
+    uint32_t dmstatus_timeout_last = 0u;
     uint32_t dmstatus_after_halt = 0u;
     uint32_t dmcontrol_after_resume = 0u;
     uint32_t a0_result = 0u;
+    uint32_t dcsr = 0u;
     uint32_t dpc = 0u;
     uint32_t mepc = 0u;
     uint32_t mcause = 0u;
@@ -1627,9 +1629,11 @@ class WchLinkRvClass : public DeviceClass
     debug_flash_loader_snapshot_.a0_valid = 0u;
     debug_flash_loader_snapshot_.dmstatus_before_resume = 0u;
     debug_flash_loader_snapshot_.dmstatus_after_resume = 0u;
+    debug_flash_loader_snapshot_.dmstatus_timeout_last = 0u;
     debug_flash_loader_snapshot_.dmstatus_after_halt = 0u;
     debug_flash_loader_snapshot_.dmcontrol_after_resume = 0u;
     debug_flash_loader_snapshot_.a0_result = 0u;
+    debug_flash_loader_snapshot_.dcsr = 0u;
     debug_flash_loader_snapshot_.dpc = 0u;
     debug_flash_loader_snapshot_.mepc = 0u;
     debug_flash_loader_snapshot_.mcause = 0u;
@@ -1644,9 +1648,11 @@ class WchLinkRvClass : public DeviceClass
     debug_flash_loader_snapshot_.a0_valid = run_debug.a0_valid;
     debug_flash_loader_snapshot_.dmstatus_before_resume = run_debug.dmstatus_before_resume;
     debug_flash_loader_snapshot_.dmstatus_after_resume = run_debug.dmstatus_after_resume;
+    debug_flash_loader_snapshot_.dmstatus_timeout_last = run_debug.dmstatus_timeout_last;
     debug_flash_loader_snapshot_.dmstatus_after_halt = run_debug.dmstatus_after_halt;
     debug_flash_loader_snapshot_.dmcontrol_after_resume = run_debug.dmcontrol_after_resume;
     debug_flash_loader_snapshot_.a0_result = run_debug.a0_result;
+    debug_flash_loader_snapshot_.dcsr = run_debug.dcsr;
     debug_flash_loader_snapshot_.dpc = run_debug.dpc;
     debug_flash_loader_snapshot_.mepc = run_debug.mepc;
     debug_flash_loader_snapshot_.mcause = run_debug.mcause;
@@ -2429,7 +2435,7 @@ class WchLinkRvClass : public DeviceClass
         }
         if (PAYLOAD_LEN == 1u && payload[0] == 0x86u)
         {
-          std::array<uint8_t, 37u> debug_payload = {};
+          std::array<uint8_t, 45u> debug_payload = {};
           debug_payload[0] = 0x86u;
           debug_payload[1] = debug_flash_loader_snapshot_.failure_stage;
           debug_payload[2] = debug_flash_loader_snapshot_.resume_ack_seen;
@@ -2437,13 +2443,15 @@ class WchLinkRvClass : public DeviceClass
           debug_payload[4] = debug_flash_loader_snapshot_.a0_valid;
           StoreBe32(debug_payload.data() + 5u, debug_flash_loader_snapshot_.dmstatus_before_resume);
           StoreBe32(debug_payload.data() + 9u, debug_flash_loader_snapshot_.dmstatus_after_resume);
-          StoreBe32(debug_payload.data() + 13u, debug_flash_loader_snapshot_.dmstatus_after_halt);
-          StoreBe32(debug_payload.data() + 17u,
+          StoreBe32(debug_payload.data() + 13u, debug_flash_loader_snapshot_.dmstatus_timeout_last);
+          StoreBe32(debug_payload.data() + 17u, debug_flash_loader_snapshot_.dmstatus_after_halt);
+          StoreBe32(debug_payload.data() + 21u,
                     debug_flash_loader_snapshot_.dmcontrol_after_resume);
-          StoreBe32(debug_payload.data() + 21u, debug_flash_loader_snapshot_.a0_result);
-          StoreBe32(debug_payload.data() + 25u, debug_flash_loader_snapshot_.dpc);
-          StoreBe32(debug_payload.data() + 29u, debug_flash_loader_snapshot_.mepc);
-          StoreBe32(debug_payload.data() + 33u, debug_flash_loader_snapshot_.mcause);
+          StoreBe32(debug_payload.data() + 25u, debug_flash_loader_snapshot_.a0_result);
+          StoreBe32(debug_payload.data() + 29u, debug_flash_loader_snapshot_.dcsr);
+          StoreBe32(debug_payload.data() + 33u, debug_flash_loader_snapshot_.dpc);
+          StoreBe32(debug_payload.data() + 37u, debug_flash_loader_snapshot_.mepc);
+          StoreBe32(debug_payload.data() + 41u, debug_flash_loader_snapshot_.mcause);
           return BuildStandardResponse(
               0x11u, debug_payload.data(), static_cast<uint16_t>(debug_payload.size()), resp, cap,
               out_len);
