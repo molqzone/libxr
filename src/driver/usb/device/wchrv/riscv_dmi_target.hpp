@@ -11,6 +11,61 @@ template <typename SdiPort>
 class RiscvDmiTarget
 {
  public:
+  struct WchTargetIdentity
+  {
+    uint32_t chip_id = 0u;
+    uint16_t flash_size_kb = 0u;
+    uint32_t uid_word0 = 0u;
+    uint32_t uid_word1 = 0u;
+  };
+
+  struct WchLinkCompatDescriptor
+  {
+    uint32_t write_pack_size = 4096u;
+    uint16_t data_packet_size = 256u;
+    uint8_t rom_ram_class = 0u;
+    uint8_t extended_rom_ram_class = 0u;
+  };
+
+  struct MemoryWriteSessionState
+  {
+    bool active = false;
+    bool autoexec_supported = false;
+    bool autoexec_enabled = false;
+    uint32_t abstractauto_saved = 0u;
+  };
+
+  enum class RunProgramFailureStage : uint8_t
+  {
+    NONE = 0u,
+    READ_DCSR,
+    WRITE_DCSR,
+    WRITE_DPC,
+    ACK_HAVE_RESET,
+    PRIME_HALTREQ_FIRST,
+    PRIME_HALTREQ_SECOND,
+    CLEAR_HALTREQ,
+    RESUME_REQ,
+    WAIT_HALT,
+    READ_A0,
+  };
+
+  struct RunProgramDebugSnapshot
+  {
+    uint8_t failure_stage = static_cast<uint8_t>(RunProgramFailureStage::NONE);
+    uint8_t resume_ack_seen = 0u;
+    uint8_t hart_halted_seen = 0u;
+    uint8_t a0_valid = 0u;
+    uint32_t dmstatus_before_resume = 0u;
+    uint32_t dmstatus_after_resume = 0u;
+    uint32_t dmstatus_after_halt = 0u;
+    uint32_t dmcontrol_after_resume = 0u;
+    uint32_t a0_result = 0u;
+    uint32_t dpc = 0u;
+    uint32_t mepc = 0u;
+    uint32_t mcause = 0u;
+  };
+
   explicit RiscvDmiTarget(SdiPort& sdi_link) : sdi_(sdi_link) {}
 
   ErrorCode DmiRead(uint8_t addr, uint32_t& data, LibXR::Debug::Sdi::Ack& ack)
@@ -34,8 +89,95 @@ class RiscvDmiTarget
 
   bool ReadDmStatus(uint32_t& dmstatus) { return DmiReadWord(DMI_DMSTATUS, dmstatus); }
 
+  static bool IsDmStatusHalted(uint32_t dmstatus)
+  {
+    return (dmstatus & (1u << 9u)) != 0u && (dmstatus & (1u << 8u)) != 0u;
+  }
+
+  static bool IsDmStatusRunning(uint32_t dmstatus)
+  {
+    return (dmstatus & (1u << 11u)) != 0u && (dmstatus & (1u << 10u)) != 0u;
+  }
+
+  static bool IsDmStatusHaveResetLatched(uint32_t dmstatus)
+  {
+    return (dmstatus & (1u << 19u)) != 0u || (dmstatus & (1u << 18u)) != 0u;
+  }
+
+  static bool IsDmStatusResumeAck(uint32_t dmstatus)
+  {
+    return (dmstatus & (1u << 17u)) != 0u && (dmstatus & (1u << 16u)) != 0u;
+  }
+
+  bool WaitForHartHalted(uint16_t max_polls = 32u, uint32_t* last_dmstatus = nullptr)
+  {
+    if (last_dmstatus)
+    {
+      *last_dmstatus = 0u;
+    }
+    for (uint16_t i = 0u; i < max_polls; ++i)
+    {
+      uint32_t dmstatus = 0u;
+      if (!ReadDmStatus(dmstatus))
+      {
+        return false;
+      }
+      if (last_dmstatus)
+      {
+        *last_dmstatus = dmstatus;
+      }
+      if (IsDmStatusHalted(dmstatus))
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool WaitForHartRunning(uint16_t max_polls = 32u)
+  {
+    for (uint16_t i = 0u; i < max_polls; ++i)
+    {
+      uint32_t dmstatus = 0u;
+      if (!ReadDmStatus(dmstatus))
+      {
+        return false;
+      }
+      if (IsDmStatusRunning(dmstatus))
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool RequestHartHalt()
+  {
+    if (!DmiWriteWord(DMI_DMCONTROL, 0x80000001u))
+    {
+      return false;
+    }
+    if (!WaitForHartHalted())
+    {
+      return false;
+    }
+    return DmiWriteWord(DMI_DMCONTROL, 0x00000001u);
+  }
+
+  bool RequestHartResume()
+  {
+    if (!DmiWriteWord(DMI_DMCONTROL, 0x40000001u))
+    {
+      return false;
+    }
+    const bool RUNNING = WaitForHartRunning();
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x00000001u);
+    return RUNNING;
+  }
+
   bool ReadWordByAbstract(uint32_t addr, uint32_t& data)
   {
+    EndMemoryWriteSession();
     if (!DmiWriteWord(DMI_PROGBUF0, 0x0002A303u))  // lw x6, 0(x5)
     {
       return false;
@@ -65,6 +207,7 @@ class RiscvDmiTarget
 
   bool WriteWordByAbstract(uint32_t addr, uint32_t data)
   {
+    EndMemoryWriteSession();
     if (!DmiWriteWord(DMI_PROGBUF0, 0x0072A023u))  // sw x7, 0(x5)
     {
       return false;
@@ -100,6 +243,7 @@ class RiscvDmiTarget
 
   bool WriteByteByAbstract(uint32_t addr, uint8_t data)
   {
+    EndMemoryWriteSession();
     if (!DmiWriteWord(DMI_PROGBUF0, 0x00728023u))  // sb x7, 0(x5)
     {
       return false;
@@ -153,18 +297,567 @@ class RiscvDmiTarget
 
   void EndHartHaltSession(bool need_resume)
   {
+    EndMemoryWriteSession();
     TryResumeHartAfterProbe(need_resume);
   }
 
- private:
-  static bool IsDmHalted(uint32_t dmstatus)
+  bool BeginMemoryWriteSession(uint32_t addr)
   {
-    return (dmstatus & (1u << 9u)) != 0u && (dmstatus & (1u << 8u)) != 0u;
+    EndMemoryWriteSession();
+
+    uint32_t abstractcs = 0u;
+    if (!DmiReadWord(DMI_ABSTRACTCS, abstractcs))
+    {
+      return false;
+    }
+
+    const uint8_t PROGBUF_SIZE = static_cast<uint8_t>((abstractcs >> 24u) & 0x1Fu);
+    const uint8_t DATA_COUNT = static_cast<uint8_t>(abstractcs & 0xFu);
+    if (PROGBUF_SIZE < 3u || DATA_COUNT == 0u)
+    {
+      return false;
+    }
+
+    if (!DmiWriteWord(DMI_PROGBUF0, 0x0062A023u))  // sw x6, 0(x5)
+    {
+      return false;
+    }
+    if (!DmiWriteWord(DMI_PROGBUF1, 0x00428293u))  // addi x5, x5, 4
+    {
+      return false;
+    }
+    if (!DmiWriteWord(DMI_PROGBUF2, 0x00100073u))  // ebreak
+    {
+      return false;
+    }
+    if (!DmiWriteWord(DMI_DATA0, addr))
+    {
+      return false;
+    }
+    if (!ClearAbstractCommandError())
+    {
+      return false;
+    }
+    if (!RunAbstractCommand(kCommandWriteX5))
+    {
+      return false;
+    }
+
+    uint32_t saved_abstractauto = 0u;
+    const bool AUTOEXEC_READY = DmiReadWord(DMI_ABSTRACTAUTO, saved_abstractauto);
+
+    memory_write_session_.active = true;
+    memory_write_session_.autoexec_enabled = false;
+    memory_write_session_.autoexec_supported = AUTOEXEC_READY;
+    memory_write_session_.abstractauto_saved = AUTOEXEC_READY ? saved_abstractauto : 0u;
+    return true;
   }
 
-  static bool IsDmRunning(uint32_t dmstatus)
+  bool WriteMemoryWordStreaming(uint32_t data)
   {
-    return (dmstatus & (1u << 11u)) != 0u && (dmstatus & (1u << 10u)) != 0u;
+    if (!memory_write_session_.active)
+    {
+      return false;
+    }
+
+    if (!DmiWriteWord(DMI_DATA0, data))
+    {
+      return false;
+    }
+
+    if (!memory_write_session_.autoexec_enabled)
+    {
+      if (!ClearAbstractCommandError())
+      {
+        return false;
+      }
+      if (!RunAbstractCommand(kCommandWriteX6Postexec))
+      {
+        return false;
+      }
+
+      if (memory_write_session_.autoexec_supported &&
+          TryEnableMemoryWriteAutoexec(memory_write_session_.abstractauto_saved))
+      {
+        memory_write_session_.autoexec_enabled = true;
+      }
+      else
+      {
+        memory_write_session_.autoexec_supported = false;
+      }
+      return true;
+    }
+
+    return WaitAbstractCommandDone();
+  }
+
+  void EndMemoryWriteSession()
+  {
+    if (memory_write_session_.active && memory_write_session_.autoexec_enabled)
+    {
+      (void)DmiWriteWord(DMI_ABSTRACTAUTO, memory_write_session_.abstractauto_saved);
+    }
+    memory_write_session_ = {};
+  }
+
+  bool WriteMemoryBlock(uint32_t addr, const uint8_t* data, uint32_t len)
+  {
+    if (!data || len == 0u)
+    {
+      return true;
+    }
+
+    uint32_t off = 0u;
+    bool streaming = false;
+    while (off < len)
+    {
+      const uint32_t CUR_ADDR = addr + off;
+      if ((CUR_ADDR & 0x3u) == 0u && (len - off) >= 4u)
+      {
+        if (!streaming)
+        {
+          streaming = BeginMemoryWriteSession(CUR_ADDR);
+        }
+
+        if (streaming)
+        {
+          while (off < len)
+          {
+            const uint32_t STREAM_ADDR = addr + off;
+            if ((STREAM_ADDR & 0x3u) != 0u || (len - off) < 4u)
+            {
+              break;
+            }
+
+            const uint32_t WORD = static_cast<uint32_t>(data[off]) |
+                                  (static_cast<uint32_t>(data[off + 1u]) << 8u) |
+                                  (static_cast<uint32_t>(data[off + 2u]) << 16u) |
+                                  (static_cast<uint32_t>(data[off + 3u]) << 24u);
+            if (!WriteMemoryWordStreaming(WORD))
+            {
+              EndMemoryWriteSession();
+              return false;
+            }
+            off += 4u;
+          }
+          continue;
+        }
+
+        const uint32_t WORD = static_cast<uint32_t>(data[off]) |
+                              (static_cast<uint32_t>(data[off + 1u]) << 8u) |
+                              (static_cast<uint32_t>(data[off + 2u]) << 16u) |
+                              (static_cast<uint32_t>(data[off + 3u]) << 24u);
+        if (!WriteWordByAbstract(CUR_ADDR, WORD))
+        {
+          return false;
+        }
+        off += 4u;
+        continue;
+      }
+
+      if (streaming)
+      {
+        EndMemoryWriteSession();
+        streaming = false;
+      }
+      if (!WriteByteByAbstract(CUR_ADDR, data[off]))
+      {
+        return false;
+      }
+      ++off;
+    }
+
+    if (streaming)
+    {
+      EndMemoryWriteSession();
+    }
+    return true;
+  }
+
+  bool WriteCpuRegister(uint16_t regno, uint32_t value)
+  {
+    return AccessCpuRegister(regno, value, true);
+  }
+
+  bool ReadCpuRegister(uint16_t regno, uint32_t& value)
+  {
+    return AccessCpuRegister(regno, value, false);
+  }
+
+  bool RunProgramAndWaitForHalt(
+      uint32_t pc, uint32_t& a0_result, uint16_t max_halt_polls = 1024u,
+      RunProgramDebugSnapshot* debug_snapshot = nullptr)
+  {
+    if (debug_snapshot)
+    {
+      *debug_snapshot = {};
+    }
+
+    auto record_failure = [&](RunProgramFailureStage stage) {
+      if (debug_snapshot)
+      {
+        debug_snapshot->failure_stage = static_cast<uint8_t>(stage);
+      }
+    };
+    auto capture_dmcontrol_after_resume = [&]() {
+      if (!debug_snapshot)
+      {
+        return;
+      }
+
+      uint32_t dmcontrol = 0u;
+      if (DmiReadWord(DMI_DMCONTROL, dmcontrol))
+      {
+        debug_snapshot->dmcontrol_after_resume = dmcontrol;
+      }
+    };
+    auto capture_halt_snapshot = [&]() {
+      if (!debug_snapshot)
+      {
+        return;
+      }
+
+      uint32_t dmstatus = 0u;
+      if (!ReadDmStatus(dmstatus))
+      {
+        return;
+      }
+
+      debug_snapshot->dmstatus_after_halt = dmstatus;
+      if (IsDmStatusResumeAck(dmstatus))
+      {
+        debug_snapshot->resume_ack_seen = 1u;
+      }
+      if (!IsDmStatusHalted(dmstatus))
+      {
+        return;
+      }
+
+      debug_snapshot->hart_halted_seen = 1u;
+
+      uint32_t reg_value = 0u;
+      if (ReadCpuRegister(kRegA0, reg_value))
+      {
+        debug_snapshot->a0_result = reg_value;
+        debug_snapshot->a0_valid = 1u;
+      }
+      if (ReadCpuRegister(kRegDpc, reg_value))
+      {
+        debug_snapshot->dpc = reg_value;
+      }
+      if (ReadCpuRegister(kRegMepc, reg_value))
+      {
+        debug_snapshot->mepc = reg_value;
+      }
+      if (ReadCpuRegister(kRegMcause, reg_value))
+      {
+        debug_snapshot->mcause = reg_value;
+      }
+    };
+
+    uint32_t saved_dcsr = 0u;
+    if (!ReadCpuRegister(kRegDcsr, saved_dcsr))
+    {
+      record_failure(RunProgramFailureStage::READ_DCSR);
+      return false;
+    }
+
+    const uint32_t DCSR_WITH_EBREAKM = saved_dcsr | kDcsrEbreakM;
+    const bool RESTORE_DCSR = DCSR_WITH_EBREAKM != saved_dcsr;
+    if (RESTORE_DCSR && !WriteCpuRegister(kRegDcsr, DCSR_WITH_EBREAKM))
+    {
+      record_failure(RunProgramFailureStage::WRITE_DCSR);
+      return false;
+    }
+
+    auto restore_dcsr = [&]() {
+      if (RESTORE_DCSR)
+      {
+        (void)WriteCpuRegister(kRegDcsr, saved_dcsr);
+      }
+    };
+
+    if (!WriteCpuRegister(kRegDpc, pc))
+    {
+      record_failure(RunProgramFailureStage::WRITE_DPC);
+      restore_dcsr();
+      return false;
+    }
+
+    uint32_t dmstatus_before_resume = 0u;
+    if (debug_snapshot && ReadDmStatus(dmstatus_before_resume))
+    {
+      debug_snapshot->dmstatus_before_resume = dmstatus_before_resume;
+    }
+
+    if (!DmiWriteWord(DMI_DMCONTROL, 0x10000001u))
+    {
+      record_failure(RunProgramFailureStage::ACK_HAVE_RESET);
+      capture_halt_snapshot();
+      restore_dcsr();
+      return false;
+    }
+    if (!DmiWriteWord(DMI_DMCONTROL, 0x80000001u))
+    {
+      record_failure(RunProgramFailureStage::PRIME_HALTREQ_FIRST);
+      capture_halt_snapshot();
+      restore_dcsr();
+      return false;
+    }
+    if (!DmiWriteWord(DMI_DMCONTROL, 0x80000001u))
+    {
+      record_failure(RunProgramFailureStage::PRIME_HALTREQ_SECOND);
+      capture_halt_snapshot();
+      restore_dcsr();
+      return false;
+    }
+    if (!DmiWriteWord(DMI_DMCONTROL, 0x00000001u))
+    {
+      record_failure(RunProgramFailureStage::CLEAR_HALTREQ);
+      capture_halt_snapshot();
+      restore_dcsr();
+      return false;
+    }
+    if (!DmiWriteWord(DMI_DMCONTROL, 0x40000001u))
+    {
+      record_failure(RunProgramFailureStage::RESUME_REQ);
+      capture_halt_snapshot();
+      restore_dcsr();
+      return false;
+    }
+
+    if (debug_snapshot)
+    {
+      for (uint8_t i = 0u; i < 32u; ++i)
+      {
+        uint32_t dmstatus = 0u;
+        if (!ReadDmStatus(dmstatus))
+        {
+          break;
+        }
+        debug_snapshot->dmstatus_after_resume = dmstatus;
+        if (IsDmStatusResumeAck(dmstatus))
+        {
+          debug_snapshot->resume_ack_seen = 1u;
+        }
+        if (IsDmStatusRunning(dmstatus) || IsDmStatusResumeAck(dmstatus))
+        {
+          break;
+        }
+      }
+      capture_dmcontrol_after_resume();
+    }
+
+    uint32_t dmstatus_after_halt = 0u;
+    if (!WaitForHartHalted(max_halt_polls, &dmstatus_after_halt))
+    {
+      record_failure(RunProgramFailureStage::WAIT_HALT);
+      if (debug_snapshot)
+      {
+        debug_snapshot->dmstatus_after_halt = dmstatus_after_halt;
+        if (IsDmStatusResumeAck(dmstatus_after_halt))
+        {
+          debug_snapshot->resume_ack_seen = 1u;
+        }
+        if (IsDmStatusHalted(dmstatus_after_halt))
+        {
+          debug_snapshot->hart_halted_seen = 1u;
+        }
+      }
+      (void)RequestHartHalt();
+      capture_halt_snapshot();
+      restore_dcsr();
+      return false;
+    }
+
+    if (debug_snapshot)
+    {
+      debug_snapshot->dmstatus_after_halt = dmstatus_after_halt;
+      debug_snapshot->hart_halted_seen = 1u;
+      if (IsDmStatusResumeAck(dmstatus_after_halt))
+      {
+        debug_snapshot->resume_ack_seen = 1u;
+      }
+    }
+
+    if (!ReadCpuRegister(kRegA0, a0_result))
+    {
+      record_failure(RunProgramFailureStage::READ_A0);
+      capture_halt_snapshot();
+      restore_dcsr();
+      return false;
+    }
+
+    if (debug_snapshot)
+    {
+      debug_snapshot->a0_result = a0_result;
+      debug_snapshot->a0_valid = 1u;
+    }
+
+    restore_dcsr();
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x00000001u);
+    return true;
+  }
+
+  bool ReadWchChipId(uint32_t& chip_id)
+  {
+    return ReadWordWithTemporaryHalt(kWchChipIdAddress, chip_id) && chip_id != 0u &&
+           chip_id != 0xFFFFFFFFu;
+  }
+
+  bool ReadWchFlashSizeKb(uint16_t& flash_size_kb)
+  {
+    uint32_t flash_size_raw = 0u;
+    if (!ReadWordWithTemporaryHalt(kWchFlashSizeAddress, flash_size_raw))
+    {
+      return false;
+    }
+
+    flash_size_kb = static_cast<uint16_t>(flash_size_raw & 0xFFFFu);
+    return IsValidWchFlashSizeKb(flash_size_kb);
+  }
+
+  bool ReadWchUidWords(uint32_t& uid_word0, uint32_t& uid_word1)
+  {
+    return ReadWordWithTemporaryHalt(kWchUidWord0Address, uid_word0) &&
+           ReadWordWithTemporaryHalt(kWchUidWord1Address, uid_word1);
+  }
+
+  bool ReadWchTargetIdentity(WchTargetIdentity& identity, bool include_uid = false)
+  {
+    if (!ReadWchChipId(identity.chip_id) || !ReadWchFlashSizeKb(identity.flash_size_kb))
+    {
+      return false;
+    }
+    if (!include_uid)
+    {
+      return true;
+    }
+    return ReadWchUidWords(identity.uid_word0, identity.uid_word1);
+  }
+
+  static uint8_t DetectWchChipFamilyFromChipId(uint32_t chip_id)
+  {
+    switch (chip_id & 0xFFF00000u)
+    {
+      case 0x20300000u:
+      case 0x20800000u:
+        return 0x05u;
+      case 0x30300000u:
+      case 0x30500000u:
+      case 0x30700000u:
+        return 0x06u;
+      case 0x31700000u:
+        return 0x86u;
+      default:
+        return 0u;
+    }
+  }
+
+  static WchLinkCompatDescriptor BuildWchLinkCompatDescriptor(uint8_t chip_family,
+                                                              uint16_t flash_size_kb)
+  {
+    WchLinkCompatDescriptor compat = {};
+    switch (chip_family)
+    {
+      case 0x01u:
+        compat.data_packet_size = 128u;
+        break;
+      case 0x09u:
+      case 0x49u:
+        compat.data_packet_size = 64u;
+        break;
+      default:
+        compat.data_packet_size = 256u;
+        break;
+    }
+
+    switch (chip_family)
+    {
+      case 0x09u:
+      case 0x49u:
+      case 0x4Eu:
+        compat.write_pack_size = 1024u;
+        break;
+      default:
+        compat.write_pack_size = 4096u;
+        break;
+    }
+
+    switch (chip_family)
+    {
+      case 0x05u:
+        switch (flash_size_kb)
+        {
+          case 128u:
+            compat.rom_ram_class = 0u;
+            break;
+          case 144u:
+            compat.rom_ram_class = 1u;
+            break;
+          case 160u:
+            compat.rom_ram_class = 2u;
+            break;
+          default:
+            break;
+        }
+        break;
+      case 0x06u:
+        switch (flash_size_kb)
+        {
+          case 192u:
+            compat.rom_ram_class = 0u;
+            compat.extended_rom_ram_class = 0u;
+            break;
+          case 224u:
+            compat.rom_ram_class = 1u;
+            compat.extended_rom_ram_class = 2u;
+            break;
+          case 256u:
+            compat.rom_ram_class = 2u;
+            compat.extended_rom_ram_class = 4u;
+            break;
+          case 288u:
+            compat.rom_ram_class = 3u;
+            compat.extended_rom_ram_class = 7u;
+            break;
+          default:
+            break;
+        }
+        break;
+      case 0x86u:
+        switch (flash_size_kb)
+        {
+          case 128u:
+            compat.extended_rom_ram_class = 6u;
+            break;
+          case 192u:
+            compat.extended_rom_ram_class = 0u;
+            break;
+          case 224u:
+            compat.extended_rom_ram_class = 2u;
+            break;
+          case 256u:
+            compat.extended_rom_ram_class = 4u;
+            break;
+          case 288u:
+            compat.extended_rom_ram_class = 7u;
+            break;
+          default:
+            break;
+        }
+        break;
+      default:
+        break;
+    }
+
+    return compat;
+  }
+
+ private:
+  static bool IsValidWchFlashSizeKb(uint32_t flash_size_kb)
+  {
+    return flash_size_kb != 0u && flash_size_kb != 0xFFFFu && flash_size_kb <= 1024u;
   }
 
   bool DmiReadWord(uint8_t addr, uint32_t& data)
@@ -182,6 +875,30 @@ class RiscvDmiTarget
   }
 
   bool ClearAbstractCommandError() { return DmiWriteWord(DMI_ABSTRACTCS, 0x00000700u); }
+
+  static uint32_t MakeRegisterAccessCommand(uint16_t regno, bool write, bool postexec = false)
+  {
+    return 0x00200000u | (postexec ? 0x00040000u : 0u) | 0x00020000u |
+           (write ? 0x00010000u : 0u) | static_cast<uint32_t>(regno);
+  }
+
+  bool TryEnableMemoryWriteAutoexec(uint32_t saved_abstractauto)
+  {
+    const uint32_t REQUESTED = saved_abstractauto | kAbstractAutoExecData0;
+    if (!DmiWriteWord(DMI_ABSTRACTAUTO, REQUESTED))
+    {
+      return false;
+    }
+
+    uint32_t confirmed_abstractauto = 0u;
+    if (!DmiReadWord(DMI_ABSTRACTAUTO, confirmed_abstractauto) ||
+        (confirmed_abstractauto & kAbstractAutoExecData0) == 0u)
+    {
+      (void)DmiWriteWord(DMI_ABSTRACTAUTO, saved_abstractauto);
+      return false;
+    }
+    return true;
+  }
 
   bool WaitAbstractCommandDone()
   {
@@ -215,6 +932,24 @@ class RiscvDmiTarget
     return WaitAbstractCommandDone();
   }
 
+  bool AccessCpuRegister(uint16_t regno, uint32_t& value, bool write)
+  {
+    EndMemoryWriteSession();
+    if (write && !DmiWriteWord(DMI_DATA0, value))
+    {
+      return false;
+    }
+    if (!ClearAbstractCommandError() || !RunAbstractCommand(MakeRegisterAccessCommand(regno, write)))
+    {
+      return false;
+    }
+    if (write)
+    {
+      return true;
+    }
+    return DmiReadWord(DMI_DATA0, value);
+  }
+
   bool EnsureHartHaltedForProbe(bool& need_resume)
   {
     need_resume = false;
@@ -223,33 +958,17 @@ class RiscvDmiTarget
     {
       return false;
     }
-    if (IsDmHalted(dmstatus))
+    if (IsDmStatusHalted(dmstatus))
     {
       return true;
     }
 
-    if (!DmiWriteWord(DMI_DMCONTROL, 0x80000001u))
+    if (!RequestHartHalt())
     {
       return false;
     }
-
-    for (uint8_t i = 0u; i < 32u; ++i)
-    {
-      if (!DmiReadWord(DMI_DMSTATUS, dmstatus))
-      {
-        return false;
-      }
-      if (IsDmHalted(dmstatus))
-      {
-        if (!DmiWriteWord(DMI_DMCONTROL, 0x00000001u))
-        {
-          return false;
-        }
-        need_resume = true;
-        return true;
-      }
-    }
-    return false;
+    need_resume = true;
+    return true;
   }
 
   void TryResumeHartAfterProbe(bool need_resume)
@@ -259,20 +978,7 @@ class RiscvDmiTarget
       return;
     }
 
-    (void)DmiWriteWord(DMI_DMCONTROL, 0x40000001u);
-    for (uint8_t i = 0u; i < 16u; ++i)
-    {
-      uint32_t dmstatus = 0u;
-      if (!DmiReadWord(DMI_DMSTATUS, dmstatus))
-      {
-        break;
-      }
-      if (IsDmRunning(dmstatus))
-      {
-        break;
-      }
-    }
-    (void)DmiWriteWord(DMI_DMCONTROL, 0x00000001u);
+    (void)RequestHartResume();
   }
 
  private:
@@ -281,10 +987,26 @@ class RiscvDmiTarget
   static constexpr uint8_t DMI_DMSTATUS = 0x11u;
   static constexpr uint8_t DMI_ABSTRACTCS = 0x16u;
   static constexpr uint8_t DMI_COMMAND = 0x17u;
+  static constexpr uint8_t DMI_ABSTRACTAUTO = 0x18u;
   static constexpr uint8_t DMI_PROGBUF0 = 0x20u;
   static constexpr uint8_t DMI_PROGBUF1 = 0x21u;
+  static constexpr uint8_t DMI_PROGBUF2 = 0x22u;
+  static constexpr uint32_t kCommandWriteX5 = 0x00231005u;
+  static constexpr uint32_t kCommandWriteX6Postexec = 0x00271006u;
+  static constexpr uint32_t kAbstractAutoExecData0 = 0x00000001u;
+  static constexpr uint16_t kRegA0 = 0x100Au;
+  static constexpr uint16_t kRegDcsr = 0x07B0u;
+  static constexpr uint16_t kRegDpc = 0x07B1u;
+  static constexpr uint16_t kRegMepc = 0x0341u;
+  static constexpr uint16_t kRegMcause = 0x0342u;
+  static constexpr uint32_t kDcsrEbreakM = 0x00008000u;
+  static constexpr uint32_t kWchChipIdAddress = 0x1FFFF704u;
+  static constexpr uint32_t kWchFlashSizeAddress = 0x1FFFF7E0u;
+  static constexpr uint32_t kWchUidWord0Address = 0x1FFFF7E8u;
+  static constexpr uint32_t kWchUidWord1Address = 0x1FFFF7ECu;
 
   SdiPort& sdi_;
+  MemoryWriteSessionState memory_write_session_ = {};
 };
 
 }  // namespace LibXR::USB
