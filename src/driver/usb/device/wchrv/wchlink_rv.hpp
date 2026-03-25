@@ -1427,10 +1427,10 @@ class WchLinkRvClass : public DeviceClass
 
     ClearFlashLoaderDebugSnapshot();
 
-    if (!riscv_target_.WriteCpuRegister(kDebugRegSp, flash_op_layout_.stack_addr) ||
-        !riscv_target_.WriteCpuRegister(kDebugRegA0, static_cast<uint32_t>(flags)) ||
-        !riscv_target_.WriteCpuRegister(kDebugRegA1, addr) ||
-        !riscv_target_.WriteCpuRegister(kDebugRegA2, len))
+    if (!riscv_target_.WriteCpuRegister(DEBUG_REG_SP, flash_op_layout_.stack_addr) ||
+        !riscv_target_.WriteCpuRegister(DEBUG_REG_A0, static_cast<uint32_t>(flags)) ||
+        !riscv_target_.WriteCpuRegister(DEBUG_REG_A1, addr) ||
+        !riscv_target_.WriteCpuRegister(DEBUG_REG_A2, len))
     {
       error_code = DATA_ACK_CODE_STREAM_LOADER_REG_FAIL_BASE;
       return false;
@@ -1494,8 +1494,8 @@ class WchLinkRvClass : public DeviceClass
       return false;
     }
 
-    flash_program_flags_ = static_cast<uint8_t>(kFlashOpFlagUnlock | kFlashOpFlagPageErase |
-                                                kFlashOpFlagProgram | kFlashOpFlagVerify);
+    flash_program_flags_ = static_cast<uint8_t>(FLASH_OP_FLAG_UNLOCK | FLASH_OP_FLAG_PAGE_ERASE |
+                                                FLASH_OP_FLAG_PROGRAM | FLASH_OP_FLAG_VERIFY);
     flash_loader_fill_ = 0u;
     flash_loader_verify_sum_ = 0u;
     flash_loader_verify_tail_fill_ = 0u;
@@ -2847,15 +2847,15 @@ class WchLinkRvClass : public DeviceClass
   static constexpr uint8_t ATTACH_ABSTRACTCS_ADDR = 0x16u;
   static constexpr uint16_t FLASH_OP_IMAGE_MAX_BYTES = 2048u;
   static constexpr uint16_t FLASH_PAGE_BUFFER_MAX_BYTES = 256u;
-  static constexpr uint16_t kDebugRegSp = 0x1002u;
-  static constexpr uint16_t kDebugRegA0 = 0x100Au;
-  static constexpr uint16_t kDebugRegA1 = 0x100Bu;
-  static constexpr uint16_t kDebugRegA2 = 0x100Cu;
-  static constexpr uint8_t kFlashOpFlagUnlock = 0x01u;
-  static constexpr uint8_t kFlashOpFlagMassErase = 0x02u;
-  static constexpr uint8_t kFlashOpFlagPageErase = 0x04u;
-  static constexpr uint8_t kFlashOpFlagProgram = 0x08u;
-  static constexpr uint8_t kFlashOpFlagVerify = 0x10u;
+  static constexpr uint16_t DEBUG_REG_SP = 0x1002u;
+  static constexpr uint16_t DEBUG_REG_A0 = 0x100Au;
+  static constexpr uint16_t DEBUG_REG_A1 = 0x100Bu;
+  static constexpr uint16_t DEBUG_REG_A2 = 0x100Cu;
+  static constexpr uint8_t FLASH_OP_FLAG_UNLOCK = 0x01u;
+  static constexpr uint8_t FLASH_OP_FLAG_MASS_ERASE = 0x02u;
+  static constexpr uint8_t FLASH_OP_FLAG_PAGE_ERASE = 0x04u;
+  static constexpr uint8_t FLASH_OP_FLAG_PROGRAM = 0x08u;
+  static constexpr uint8_t FLASH_OP_FLAG_VERIFY = 0x10u;
 
 #pragma pack(push, 1)
   struct WchLinkRvDescBlock

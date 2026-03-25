@@ -85,6 +85,8 @@ class SwdGeneralGPIO final : public Swd
       clock_hz_ = 0u;
       half_period_ns_ = 0u;
       half_period_loops_ = 0u;
+      sample_point_loops_ = 0u;
+      post_sample_loops_ = 0u;
       return ErrorCode::OK;
     }
 
@@ -108,6 +110,8 @@ class SwdGeneralGPIO final : public Swd
     if (loops_per_us_ == 0u)
     {
       half_period_loops_ = 0u;
+      sample_point_loops_ = 0u;
+      post_sample_loops_ = 0u;
       return ErrorCode::OK;
     }
 
@@ -129,6 +133,17 @@ class SwdGeneralGPIO final : public Swd
       half_period_loops_ = (LOOPS_CEIL_F >= static_cast<double>(UINT32_MAX))
                                ? UINT32_MAX
                                : static_cast<uint32_t>(LOOPS_CEIL_F);
+    }
+
+    if (half_period_loops_ <= 1u)
+    {
+      sample_point_loops_ = half_period_loops_;
+      post_sample_loops_ = 0u;
+    }
+    else
+    {
+      sample_point_loops_ = (half_period_loops_ + 1u) / 2u;
+      post_sample_loops_ = half_period_loops_ - sample_point_loops_;
     }
 
     return ErrorCode::OK;
@@ -267,21 +282,21 @@ class SwdGeneralGPIO final : public Swd
 
     for (uint32_t i = 0; i < cycles; ++i)
     {
-      // Use the updated read phase (CMSIS-style)
       bool bit = false;
       if (half_period_loops_ == 0u)
       {
         swclk_.Write(false);
-        bit = swdio_.Read();
         swclk_.Write(true);
+        bit = swdio_.Read();
       }
       else
       {
         swclk_.Write(false);
         DelayHalf();
-        bit = swdio_.Read();
         swclk_.Write(true);
-        DelayHalf();
+        DelayToSamplePoint();
+        bit = swdio_.Read();
+        DelayAfterSample();
       }
 
       if (bit)
@@ -294,6 +309,71 @@ class SwdGeneralGPIO final : public Swd
       swclk_.Write(false);
     }
 
+    return ErrorCode::OK;
+  }
+
+  ErrorCode BeginRvSwdFrame()
+  {
+    const ErrorCode EC = SetSwdioDriveMode();
+    if (EC != ErrorCode::OK)
+    {
+      return EC;
+    }
+
+    swdio_.Write(true);
+    swclk_.Write(true);
+    DelayHalf();
+    swdio_.Write(false);
+    DelayHalf();
+    swclk_.Write(false);
+    return ErrorCode::OK;
+  }
+
+  ErrorCode EndRvSwdFrame()
+  {
+    const ErrorCode EC = SetSwdioDriveMode();
+    if (EC != ErrorCode::OK)
+    {
+      return EC;
+    }
+
+    swdio_.Write(false);
+    swclk_.Write(false);
+    DelayHalf();
+    swclk_.Write(true);
+    DelayHalf();
+    swdio_.Write(true);
+    DelayHalf();
+    return ErrorCode::OK;
+  }
+
+  ErrorCode WakeRvSwd()
+  {
+    const ErrorCode EC = SetSwdioDriveMode();
+    if (EC != ErrorCode::OK)
+    {
+      return EC;
+    }
+
+    // Match the external RVSWD reset model:
+    // - keep DIO released high
+    // - issue 100 low/high clock pulses
+    // - finish with a stop condition while CLK stays high
+    swdio_.Write(true);
+    swclk_.Write(true);
+    DelayHalf();
+    for (uint32_t i = 0u; i < 100u; ++i)
+    {
+      swclk_.Write(false);
+      DelayHalf();
+      swclk_.Write(true);
+      DelayHalf();
+    }
+
+    swdio_.Write(false);
+    DelayHalf();
+    swdio_.Write(true);
+    DelayHalf();
     return ErrorCode::OK;
   }
 
@@ -357,7 +437,7 @@ class SwdGeneralGPIO final : public Swd
 
   ErrorCode SetSwdioDriveMode()
   {
-    if (swdio_mode_ == SwdioMode::UNKNOWN)
+    if (swdio_mode_ != SwdioMode::DRIVE_OD)
     {
       const ErrorCode EC = swdio_.SetConfig(
           {SwdioGpioType::Direction::OUTPUT_OPEN_DRAIN, SwdioGpioType::Pull::UP});
@@ -373,24 +453,22 @@ class SwdGeneralGPIO final : public Swd
 
   ErrorCode SetSwdioSampleMode()
   {
-    const ErrorCode EC = SetSwdioDriveMode();
-    if (EC != ErrorCode::OK)
+    if (swdio_mode_ != SwdioMode::SAMPLE_IN)
     {
-      return EC;
+      const ErrorCode EC =
+          swdio_.SetConfig({SwdioGpioType::Direction::INPUT, SwdioGpioType::Pull::UP});
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
     }
-
-    // 约束：GPIO::Read() 需要在开漏输出模式下返回实际引脚电平（而不是输出锁存值）。
-    // Constraint: GPIO::Read() must sample the physical pin level in open-drain output
-    // mode (not just the output latch).
-    //
-    // 开漏输出高电平表示释放总线，目标可驱动 ACK/数据 / Open-drain high releases line
-    // so target can drive ACK/data.
-    swdio_.Write(true);
     swdio_mode_ = SwdioMode::SAMPLE_IN;
     return ErrorCode::OK;
   }
 
   inline void DelayHalf() { BusyLoop(half_period_loops_); }
+  inline void DelayToSamplePoint() { BusyLoop(sample_point_loops_); }
+  inline void DelayAfterSample() { BusyLoop(post_sample_loops_); }
 
   inline void GenOneClk()
   {
@@ -408,14 +486,20 @@ class SwdGeneralGPIO final : public Swd
 
   inline void WriteBit(bool bit)
   {
+    swclk_.Write(false);
+    DelayHalf();
     swdio_.Write(bit);
-    GenOneClk();
+    swclk_.Write(true);
+    DelayHalf();
+    swclk_.Write(false);
   }
 
   inline void WriteBitWithoutDelay(bool bit)
   {
+    swclk_.Write(false);
     swdio_.Write(bit);
-    GenOneClkWithoutDelay();
+    swclk_.Write(true);
+    swclk_.Write(false);
   }
 
   inline void WriteByteLSB(uint8_t b)
@@ -438,17 +522,20 @@ class SwdGeneralGPIO final : public Swd
   {
     swclk_.Write(false);
     DelayHalf();
-    const bool BIT = swdio_.Read();
     swclk_.Write(true);
-    DelayHalf();
+    DelayToSamplePoint();
+    const bool BIT = swdio_.Read();
+    DelayAfterSample();
+    swclk_.Write(false);
     return BIT;
   }
 
   inline bool ReadBitAndClockWithoutDelay()
   {
     swclk_.Write(false);
-    const bool BIT = swdio_.Read();
     swclk_.Write(true);
+    const bool BIT = swdio_.Read();
+    swclk_.Write(false);
     return BIT;
   }
 
@@ -487,6 +574,54 @@ class SwdGeneralGPIO final : public Swd
   }
 
  private:
+  ErrorCode TurnaroundToSample()
+  {
+    const ErrorCode EC = SetSwdioSampleMode();
+    if (EC != ErrorCode::OK)
+    {
+      return EC;
+    }
+
+    swclk_.Write(false);
+    DelayHalf();
+    swclk_.Write(true);
+    DelayHalf();
+    swclk_.Write(false);
+    return ErrorCode::OK;
+  }
+
+  ErrorCode TurnaroundToSampleWithoutDelay()
+  {
+    const ErrorCode EC = SetSwdioSampleMode();
+    if (EC != ErrorCode::OK)
+    {
+      return EC;
+    }
+
+    swclk_.Write(false);
+    swclk_.Write(true);
+    swclk_.Write(false);
+    return ErrorCode::OK;
+  }
+
+  ErrorCode TurnaroundToDrive()
+  {
+    swclk_.Write(false);
+    DelayHalf();
+    swclk_.Write(true);
+    DelayHalf();
+    swclk_.Write(false);
+    return SetSwdioDriveMode();
+  }
+
+  ErrorCode TurnaroundToDriveWithoutDelay()
+  {
+    swclk_.Write(false);
+    swclk_.Write(true);
+    swclk_.Write(false);
+    return SetSwdioDriveMode();
+  }
+
   ErrorCode TransferWithDelay(const SwdProtocol::Request& req,
                               SwdProtocol::Response& resp)
   {
@@ -500,10 +635,14 @@ class SwdGeneralGPIO final : public Swd
     (void)SetSwdioDriveMode();
     WriteByteLSB(REQUEST_BYTE);
 
-    (void)SetSwdioSampleMode();
-    GenOneClk();  // turnaround Host -> Target
+    ErrorCode EC = TurnaroundToSample();
+    if (EC != ErrorCode::OK)
+    {
+      return EC;
+    }
 
-    // ACK: CMSIS SW_READ_BIT phase (sample in low phase)
+    // RVSWD data is observed after the rising edge; keep ACK/data sampling
+    // aligned with the high phase rather than the preceding low phase.
     uint8_t ack_raw = 0u;
     for (uint32_t i = 0; i < ACK_BITS; ++i)
     {
@@ -516,8 +655,11 @@ class SwdGeneralGPIO final : public Swd
 
     if (resp.ack != SwdProtocol::Ack::OK)
     {
-      GenOneClk();  // turnaround Target -> Host (skip data)
-      (void)SetSwdioDriveMode();
+      EC = TurnaroundToDrive();  // turnaround Target -> Host (skip data)
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
       swdio_.Write(true);
       swclk_.Write(false);
       return ErrorCode::OK;
@@ -536,16 +678,21 @@ class SwdGeneralGPIO final : public Swd
       resp.rdata = data;
       resp.parity_ok = (static_cast<uint8_t>(PARITY_BIT) == Parity32(data));
 
-      (void)SetSwdioDriveMode();
+      EC = TurnaroundToDrive();
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
       swdio_.Write(true);
-      GenOneClk();
-
       swclk_.Write(false);
     }
     else
     {
-      (void)SetSwdioDriveMode();
-      GenOneClk();
+      EC = TurnaroundToDrive();
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
 
       const uint32_t DATA = req.wdata;
       for (uint32_t byte = 0; byte < 4u; ++byte)
@@ -577,10 +724,14 @@ class SwdGeneralGPIO final : public Swd
     (void)SetSwdioDriveMode();
     WriteByteLSBWithoutDelay(REQUEST_BYTE);
 
-    (void)SetSwdioSampleMode();
-    GenOneClkWithoutDelay();  // turnaround Host -> Target
+    ErrorCode EC = TurnaroundToSampleWithoutDelay();
+    if (EC != ErrorCode::OK)
+    {
+      return EC;
+    }
 
-    // ACK: CMSIS SW_READ_BIT phase (sample in low phase)
+    // RVSWD data is observed after the rising edge; keep ACK/data sampling
+    // aligned with the high phase rather than the preceding low phase.
     uint8_t ack_raw = 0u;
     for (uint32_t i = 0; i < ACK_BITS; ++i)
     {
@@ -593,8 +744,11 @@ class SwdGeneralGPIO final : public Swd
 
     if (resp.ack != SwdProtocol::Ack::OK)
     {
-      GenOneClkWithoutDelay();
-      (void)SetSwdioDriveMode();
+      EC = TurnaroundToDriveWithoutDelay();
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
       swdio_.Write(true);
       swclk_.Write(false);
       return ErrorCode::OK;
@@ -613,16 +767,21 @@ class SwdGeneralGPIO final : public Swd
       resp.rdata = data;
       resp.parity_ok = (static_cast<uint8_t>(PARITY_BIT) == Parity32(data));
 
-      (void)SetSwdioDriveMode();
+      EC = TurnaroundToDriveWithoutDelay();
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
       swdio_.Write(true);
-      GenOneClkWithoutDelay();
-
       swclk_.Write(false);
     }
     else
     {
-      (void)SetSwdioDriveMode();
-      GenOneClkWithoutDelay();
+      EC = TurnaroundToDriveWithoutDelay();
+      if (EC != ErrorCode::OK)
+      {
+        return EC;
+      }
 
       const uint32_t DATA = req.wdata;
       for (uint32_t byte = 0; byte < 4u; ++byte)
@@ -662,6 +821,8 @@ class SwdGeneralGPIO final : public Swd
   uint32_t loops_per_us_ = 0u;       // 手调系数：BusyLoop 每微秒大约需要的迭代数
   uint32_t half_period_ns_ = 0u;     // 当前半周期（ns）
   uint32_t half_period_loops_ = 0u;  // 当前半周期对应的 BusyLoop 迭代数
+  uint32_t sample_point_loops_ = 0u;
+  uint32_t post_sample_loops_ = 0u;
 
   SwdioMode swdio_mode_ =
       SwdioMode::UNKNOWN;  ///< SWDIO 当前模式缓存。Cached current SWDIO mode.

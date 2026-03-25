@@ -224,6 +224,13 @@ class SdiGeneralGPIO final : public Sdi
       return ec;
     }
 
+    std::array<uint8_t, 1> turnaround = {};
+    ec = port_.SeqReadBits(1u, turnaround.data());
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
     ec = ReadMsbFirstU32(port_, 32u, data);
     if (ec != ErrorCode::OK)
     {
@@ -239,4 +246,3 @@ class SdiGeneralGPIO final : public Sdi
 };
 
 }  // namespace LibXR::Debug
-

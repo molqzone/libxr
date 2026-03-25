@@ -340,7 +340,7 @@ class RiscvDmiTarget
     {
       return false;
     }
-    if (!RunAbstractCommand(kCommandWriteX5))
+    if (!RunAbstractCommand(COMMAND_WRITE_X5))
     {
       return false;
     }
@@ -373,7 +373,7 @@ class RiscvDmiTarget
       {
         return false;
       }
-      if (!RunAbstractCommand(kCommandWriteX6Postexec))
+      if (!RunAbstractCommand(COMMAND_WRITE_X6_POSTEXEC))
       {
         return false;
       }
@@ -543,39 +543,39 @@ class RiscvDmiTarget
       debug_snapshot->hart_halted_seen = 1u;
 
       uint32_t reg_value = 0u;
-      if (ReadCpuRegister(kRegDcsr, reg_value))
+      if (ReadCpuRegister(REG_DCSR, reg_value))
       {
         debug_snapshot->dcsr = reg_value;
       }
-      if (ReadCpuRegister(kRegA0, reg_value))
+      if (ReadCpuRegister(REG_A0, reg_value))
       {
         debug_snapshot->a0_result = reg_value;
         debug_snapshot->a0_valid = 1u;
       }
-      if (ReadCpuRegister(kRegDpc, reg_value))
+      if (ReadCpuRegister(REG_DPC, reg_value))
       {
         debug_snapshot->dpc = reg_value;
       }
-      if (ReadCpuRegister(kRegMepc, reg_value))
+      if (ReadCpuRegister(REG_MEPC, reg_value))
       {
         debug_snapshot->mepc = reg_value;
       }
-      if (ReadCpuRegister(kRegMcause, reg_value))
+      if (ReadCpuRegister(REG_MCAUSE, reg_value))
       {
         debug_snapshot->mcause = reg_value;
       }
     };
 
     uint32_t saved_dcsr = 0u;
-    if (!ReadCpuRegister(kRegDcsr, saved_dcsr))
+    if (!ReadCpuRegister(REG_DCSR, saved_dcsr))
     {
       record_failure(RunProgramFailureStage::READ_DCSR);
       return false;
     }
 
-    const uint32_t DCSR_WITH_EBREAKM = saved_dcsr | kDcsrEbreakM;
+    const uint32_t DCSR_WITH_EBREAKM = saved_dcsr | DCSR_EBREAK_M;
     const bool RESTORE_DCSR = DCSR_WITH_EBREAKM != saved_dcsr;
-    if (RESTORE_DCSR && !WriteCpuRegister(kRegDcsr, DCSR_WITH_EBREAKM))
+    if (RESTORE_DCSR && !WriteCpuRegister(REG_DCSR, DCSR_WITH_EBREAKM))
     {
       record_failure(RunProgramFailureStage::WRITE_DCSR);
       return false;
@@ -584,11 +584,11 @@ class RiscvDmiTarget
     auto restore_dcsr = [&]() {
       if (RESTORE_DCSR)
       {
-        (void)WriteCpuRegister(kRegDcsr, saved_dcsr);
+        (void)WriteCpuRegister(REG_DCSR, saved_dcsr);
       }
     };
 
-    if (!WriteCpuRegister(kRegDpc, pc))
+    if (!WriteCpuRegister(REG_DPC, pc))
     {
       record_failure(RunProgramFailureStage::WRITE_DPC);
       restore_dcsr();
@@ -692,13 +692,13 @@ class RiscvDmiTarget
         debug_snapshot->resume_ack_seen = 1u;
       }
       uint32_t reg_value = 0u;
-      if (ReadCpuRegister(kRegDcsr, reg_value))
+      if (ReadCpuRegister(REG_DCSR, reg_value))
       {
         debug_snapshot->dcsr = reg_value;
       }
     }
 
-    if (!ReadCpuRegister(kRegA0, a0_result))
+    if (!ReadCpuRegister(REG_A0, a0_result))
     {
       record_failure(RunProgramFailureStage::READ_A0);
       capture_halt_snapshot();
@@ -719,14 +719,14 @@ class RiscvDmiTarget
 
   bool ReadWchChipId(uint32_t& chip_id)
   {
-    return ReadWordWithTemporaryHalt(kWchChipIdAddress, chip_id) && chip_id != 0u &&
+    return ReadWordWithTemporaryHalt(WCH_CHIP_ID_ADDRESS, chip_id) && chip_id != 0u &&
            chip_id != 0xFFFFFFFFu;
   }
 
   bool ReadWchFlashSizeKb(uint16_t& flash_size_kb)
   {
     uint32_t flash_size_raw = 0u;
-    if (!ReadWordWithTemporaryHalt(kWchFlashSizeAddress, flash_size_raw))
+    if (!ReadWordWithTemporaryHalt(WCH_FLASH_SIZE_ADDRESS, flash_size_raw))
     {
       return false;
     }
@@ -737,8 +737,8 @@ class RiscvDmiTarget
 
   bool ReadWchUidWords(uint32_t& uid_word0, uint32_t& uid_word1)
   {
-    return ReadWordWithTemporaryHalt(kWchUidWord0Address, uid_word0) &&
-           ReadWordWithTemporaryHalt(kWchUidWord1Address, uid_word1);
+    return ReadWordWithTemporaryHalt(WCH_UID_WORD0_ADDRESS, uid_word0) &&
+           ReadWordWithTemporaryHalt(WCH_UID_WORD1_ADDRESS, uid_word1);
   }
 
   bool ReadWchTargetIdentity(WchTargetIdentity& identity, bool include_uid = false)
@@ -902,7 +902,7 @@ class RiscvDmiTarget
 
   bool TryEnableMemoryWriteAutoexec(uint32_t saved_abstractauto)
   {
-    const uint32_t REQUESTED = saved_abstractauto | kAbstractAutoExecData0;
+    const uint32_t REQUESTED = saved_abstractauto | ABSTRACTAUTO_EXEC_DATA0;
     if (!DmiWriteWord(DMI_ABSTRACTAUTO, REQUESTED))
     {
       return false;
@@ -910,7 +910,7 @@ class RiscvDmiTarget
 
     uint32_t confirmed_abstractauto = 0u;
     if (!DmiReadWord(DMI_ABSTRACTAUTO, confirmed_abstractauto) ||
-        (confirmed_abstractauto & kAbstractAutoExecData0) == 0u)
+        (confirmed_abstractauto & ABSTRACTAUTO_EXEC_DATA0) == 0u)
     {
       (void)DmiWriteWord(DMI_ABSTRACTAUTO, saved_abstractauto);
       return false;
@@ -1009,19 +1009,19 @@ class RiscvDmiTarget
   static constexpr uint8_t DMI_PROGBUF0 = 0x20u;
   static constexpr uint8_t DMI_PROGBUF1 = 0x21u;
   static constexpr uint8_t DMI_PROGBUF2 = 0x22u;
-  static constexpr uint32_t kCommandWriteX5 = 0x00231005u;
-  static constexpr uint32_t kCommandWriteX6Postexec = 0x00271006u;
-  static constexpr uint32_t kAbstractAutoExecData0 = 0x00000001u;
-  static constexpr uint16_t kRegA0 = 0x100Au;
-  static constexpr uint16_t kRegDcsr = 0x07B0u;
-  static constexpr uint16_t kRegDpc = 0x07B1u;
-  static constexpr uint16_t kRegMepc = 0x0341u;
-  static constexpr uint16_t kRegMcause = 0x0342u;
-  static constexpr uint32_t kDcsrEbreakM = 0x00008000u;
-  static constexpr uint32_t kWchChipIdAddress = 0x1FFFF704u;
-  static constexpr uint32_t kWchFlashSizeAddress = 0x1FFFF7E0u;
-  static constexpr uint32_t kWchUidWord0Address = 0x1FFFF7E8u;
-  static constexpr uint32_t kWchUidWord1Address = 0x1FFFF7ECu;
+  static constexpr uint32_t COMMAND_WRITE_X5 = 0x00231005u;
+  static constexpr uint32_t COMMAND_WRITE_X6_POSTEXEC = 0x00271006u;
+  static constexpr uint32_t ABSTRACTAUTO_EXEC_DATA0 = 0x00000001u;
+  static constexpr uint16_t REG_A0 = 0x100Au;
+  static constexpr uint16_t REG_DCSR = 0x07B0u;
+  static constexpr uint16_t REG_DPC = 0x07B1u;
+  static constexpr uint16_t REG_MEPC = 0x0341u;
+  static constexpr uint16_t REG_MCAUSE = 0x0342u;
+  static constexpr uint32_t DCSR_EBREAK_M = 0x00008000u;
+  static constexpr uint32_t WCH_CHIP_ID_ADDRESS = 0x1FFFF704u;
+  static constexpr uint32_t WCH_FLASH_SIZE_ADDRESS = 0x1FFFF7E0u;
+  static constexpr uint32_t WCH_UID_WORD0_ADDRESS = 0x1FFFF7E8u;
+  static constexpr uint32_t WCH_UID_WORD1_ADDRESS = 0x1FFFF7ECu;
 
   SdiPort& sdi_;
   MemoryWriteSessionState memory_write_session_ = {};
