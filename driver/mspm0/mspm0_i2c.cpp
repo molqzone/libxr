@@ -1,6 +1,9 @@
 #include "mspm0_i2c.hpp"
 
+#include <cstdint>
 #include <cstring>
+
+#include "dl_dma.h"
 
 using namespace LibXR;
 
@@ -10,43 +13,109 @@ namespace
 constexpr uint32_t MSPM0_I2C_WAIT_IDLE_TIMEOUT = 300000;
 constexpr uint32_t MSPM0_I2C_WAIT_BUS_TIMEOUT = 300000;
 constexpr uint32_t MSPM0_I2C_WAIT_FIFO_TIMEOUT = 300000;
-constexpr uint32_t MSPM0_I2C_MAX_ISR_ROUNDS = 32;
-
-constexpr uint32_t MSPM0_I2C_ASYNC_INTERRUPT_MASK =
-    DL_I2C_INTERRUPT_CONTROLLER_TXFIFO_TRIGGER |
-    DL_I2C_INTERRUPT_CONTROLLER_RXFIFO_TRIGGER | DL_I2C_INTERRUPT_CONTROLLER_TX_DONE |
-    DL_I2C_INTERRUPT_CONTROLLER_RX_DONE | DL_I2C_INTERRUPT_CONTROLLER_NACK |
-    DL_I2C_INTERRUPT_CONTROLLER_ARBITRATION_LOST;
+constexpr uint32_t MSPM0_I2C_POLLING_ATTEMPTS = 2;
+constexpr uint32_t MSPM0_I2C_MEMREAD_RS_ATTEMPTS = 2;
+constexpr uint32_t MSPM0_I2C_MEMREAD_FALLBACK_ATTEMPTS = 3;
 
 constexpr uint16_t MSPM0_I2C_MAX_TRANSFER_SIZE = 0x0FFF;
+
+#if !defined(DMA_CH_TX_CHAN_ID) || !defined(DMA_CH_RX_CHAN_ID)
+#error "MSPM0I2C requires SysConfig DMA channels (DMA_CH_TX_CHAN_ID/DMA_CH_RX_CHAN_ID)."
+#endif
+
+constexpr DL_DMA_Config MSPM0_I2C_DMA_TX_CONFIG_BASE = {
+    .trigger = 0U,
+    .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
+    .transferMode = DL_DMA_SINGLE_TRANSFER_MODE,
+    .extendedMode = DL_DMA_NORMAL_MODE,
+    .srcWidth = DL_DMA_WIDTH_BYTE,
+    .destWidth = DL_DMA_WIDTH_BYTE,
+    .srcIncrement = DL_DMA_ADDR_INCREMENT,
+    .destIncrement = DL_DMA_ADDR_UNCHANGED,
+};
+
+constexpr DL_DMA_Config MSPM0_I2C_DMA_RX_CONFIG_BASE = {
+    .trigger = 0U,
+    .triggerType = DL_DMA_TRIGGER_TYPE_EXTERNAL,
+    .transferMode = DL_DMA_SINGLE_TRANSFER_MODE,
+    .extendedMode = DL_DMA_NORMAL_MODE,
+    .srcWidth = DL_DMA_WIDTH_BYTE,
+    .destWidth = DL_DMA_WIDTH_BYTE,
+    .srcIncrement = DL_DMA_ADDR_UNCHANGED,
+    .destIncrement = DL_DMA_ADDR_INCREMENT,
+};
+
+constexpr uint32_t mspm0_i2c_dma_channel_mask(uint8_t channel_id)
+{
+  return (1UL << channel_id);
+}
+
+bool mspm0_i2c_resolve_dma_triggers(I2C_Regs* instance, uint8_t& tx_trigger,
+                                    uint8_t& rx_trigger)
+{
+#if defined(I2C0_BASE) && defined(DMA_I2C0_TX_TRIG) && defined(DMA_I2C0_RX_TRIG)
+  if (instance == I2C0)
+  {
+    tx_trigger = DMA_I2C0_TX_TRIG;
+    rx_trigger = DMA_I2C0_RX_TRIG;
+    return true;
+  }
+#endif
+#if defined(I2C1_BASE) && defined(DMA_I2C1_TX_TRIG) && defined(DMA_I2C1_RX_TRIG)
+  if (instance == I2C1)
+  {
+    tx_trigger = DMA_I2C1_TX_TRIG;
+    rx_trigger = DMA_I2C1_RX_TRIG;
+    return true;
+  }
+#endif
+#if defined(I2C2_BASE) && defined(DMA_I2C2_TX_TRIG) && defined(DMA_I2C2_RX_TRIG)
+  if (instance == I2C2)
+  {
+    tx_trigger = DMA_I2C2_TX_TRIG;
+    rx_trigger = DMA_I2C2_RX_TRIG;
+    return true;
+  }
+#endif
+#if defined(I2C3_BASE) && defined(DMA_I2C3_TX_TRIG) && defined(DMA_I2C3_RX_TRIG)
+  if (instance == I2C3)
+  {
+    tx_trigger = DMA_I2C3_TX_TRIG;
+    rx_trigger = DMA_I2C3_RX_TRIG;
+    return true;
+  }
+#endif
+  return false;
+}
 
 constexpr uint16_t mspm0_i2c_to_addr7(uint16_t slave_addr)
 {
   return static_cast<uint16_t>((slave_addr >> 1) & 0x7F);
 }
 
+void mspm0_i2c_recover_controller(I2C_Regs* instance)
+{
+  DL_I2C_disableInterrupt(instance, 0xFFFFFFFFU);
+  DL_I2C_clearInterruptStatus(instance, 0xFFFFFFFFU);
+  DL_I2C_disableControllerReadOnTXEmpty(instance);
+  DL_I2C_resetControllerTransfer(instance);
+  DL_I2C_enableController(instance);
+}
+
 }  // namespace
 
-MSPM0I2C* MSPM0I2C::instance_map_[MAX_I2C_INSTANCES] = {nullptr};
-
-MSPM0I2C::MSPM0I2C(Resources res, RawData stage_buffer, uint32_t irq_enable_min_size,
+MSPM0I2C::MSPM0I2C(Resources res, RawData stage_buffer, uint32_t dma_enable_min_size,
                    I2C::Configuration config)
     : I2C(),
       res_(res),
       stage_buffer_(stage_buffer),
-      irq_enable_min_size_(irq_enable_min_size)
+      dma_enable_min_size_(dma_enable_min_size)
 {
   ASSERT(res_.instance != nullptr);
   ASSERT(res_.clock_freq > 0);
   ASSERT(res_.index < MAX_I2C_INSTANCES);
-  ASSERT(instance_map_[res_.index] == nullptr);
   ASSERT(stage_buffer_.addr_ != nullptr);
   ASSERT(stage_buffer_.size_ > 0);
-
-  instance_map_[res_.index] = this;
-
-  NVIC_ClearPendingIRQ(res_.irqn);
-  NVIC_EnableIRQ(res_.irqn);
 
   if (config.clock_speed == 0)
   {
@@ -148,15 +217,47 @@ ErrorCode MSPM0I2C::SetConfig(Configuration config)
       .divideRatio = DL_I2C_CLOCK_DIVIDE_1,
   };
 
+  uint8_t dma_tx_trigger = 0U;
+  uint8_t dma_rx_trigger = 0U;
+  const bool USE_DMA =
+      mspm0_i2c_resolve_dma_triggers(res_.instance, dma_tx_trigger, dma_rx_trigger);
+  dma_enabled_ = USE_DMA;
+
   DL_I2C_disableController(res_.instance);
   DL_I2C_setClockConfig(res_.instance, &CLOCK_CONFIG);
   DL_I2C_resetControllerTransfer(res_.instance);
   DL_I2C_setTimerPeriod(res_.instance, TIMER_PERIOD);
-  DL_I2C_setControllerTXFIFOThreshold(res_.instance, DL_I2C_TX_FIFO_LEVEL_BYTES_1);
+  DL_I2C_setControllerTXFIFOThreshold(
+      res_.instance, USE_DMA ? DL_I2C_TX_FIFO_LEVEL_EMPTY : DL_I2C_TX_FIFO_LEVEL_BYTES_1);
   DL_I2C_setControllerRXFIFOThreshold(res_.instance, DL_I2C_RX_FIFO_LEVEL_BYTES_1);
-  DL_I2C_disableControllerClockStretching(res_.instance);
+  DL_I2C_enableControllerClockStretching(res_.instance);
   DL_I2C_disableInterrupt(res_.instance, 0xFFFFFFFFU);
   DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
+
+  DL_I2C_disableDMAEvent(res_.instance, DL_I2C_EVENT_ROUTE_1,
+                         DL_I2C_DMA_INTERRUPT_CONTROLLER_TXFIFO_TRIGGER);
+  DL_I2C_disableDMAEvent(res_.instance, DL_I2C_EVENT_ROUTE_2,
+                         DL_I2C_DMA_INTERRUPT_CONTROLLER_RXFIFO_TRIGGER);
+  DL_DMA_disableChannel(DMA, DMA_CH_TX_CHAN_ID);
+  DL_DMA_disableChannel(DMA, DMA_CH_RX_CHAN_ID);
+  DL_DMA_clearInterruptStatus(DMA, mspm0_i2c_dma_channel_mask(DMA_CH_TX_CHAN_ID) |
+                                       mspm0_i2c_dma_channel_mask(DMA_CH_RX_CHAN_ID));
+
+  if (USE_DMA)
+  {
+    DL_DMA_Config dma_tx_config = MSPM0_I2C_DMA_TX_CONFIG_BASE;
+    DL_DMA_Config dma_rx_config = MSPM0_I2C_DMA_RX_CONFIG_BASE;
+    dma_tx_config.trigger = dma_tx_trigger;
+    dma_rx_config.trigger = dma_rx_trigger;
+
+    DL_I2C_enableDMAEvent(res_.instance, DL_I2C_EVENT_ROUTE_1,
+                          DL_I2C_DMA_INTERRUPT_CONTROLLER_TXFIFO_TRIGGER);
+    DL_I2C_enableDMAEvent(res_.instance, DL_I2C_EVENT_ROUTE_2,
+                          DL_I2C_DMA_INTERRUPT_CONTROLLER_RXFIFO_TRIGGER);
+    DL_DMA_initChannel(DMA, DMA_CH_TX_CHAN_ID, &dma_tx_config);
+    DL_DMA_initChannel(DMA, DMA_CH_RX_CHAN_ID, &dma_rx_config);
+  }
+
   DL_I2C_enableController(res_.instance);
 
   return ErrorCode::OK;
@@ -173,46 +274,62 @@ ErrorCode MSPM0I2C::PollingWrite7(uint16_t addr7, const uint8_t* data, size_t si
     return ErrorCode::ARG_ERR;
   }
 
-  ErrorCode ans = WaitControllerIdle();
-  if (ans != ErrorCode::OK)
+  auto attempt_once = [&]() -> ErrorCode
   {
-    return ans;
-  }
-
-  DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
-
-  size_t sent =
-      DL_I2C_fillControllerTXFIFO(res_.instance, data, static_cast<uint16_t>(size));
-  DL_I2C_startControllerTransfer(res_.instance, addr7, DL_I2C_CONTROLLER_DIRECTION_TX,
-                                 static_cast<uint16_t>(size));
-
-  while (sent < size)
-  {
-    uint32_t timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
-    while (DL_I2C_getRawInterruptStatus(res_.instance,
-                                        DL_I2C_INTERRUPT_CONTROLLER_TXFIFO_TRIGGER) == 0U)
+    ErrorCode ans = WaitControllerIdle();
+    if (ans != ErrorCode::OK)
     {
-      if (CheckControllerError() != ErrorCode::OK)
-      {
-        return ErrorCode::FAILED;
-      }
-      if (timeout-- == 0)
-      {
-        return ErrorCode::BUSY;
-      }
+      return ans;
     }
 
-    sent += DL_I2C_fillControllerTXFIFO(res_.instance, data + sent,
-                                        static_cast<uint16_t>(size - sent));
-  }
+    DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
 
-  ans = WaitBusIdle();
-  if (ans != ErrorCode::OK)
+    size_t sent =
+        DL_I2C_fillControllerTXFIFO(res_.instance, data, static_cast<uint16_t>(size));
+    DL_I2C_startControllerTransfer(res_.instance, addr7, DL_I2C_CONTROLLER_DIRECTION_TX,
+                                   static_cast<uint16_t>(size));
+
+    while (sent < size)
+    {
+      uint32_t timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
+      while (DL_I2C_getRawInterruptStatus(
+                 res_.instance, DL_I2C_INTERRUPT_CONTROLLER_TXFIFO_TRIGGER) == 0U)
+      {
+        if (CheckControllerError() != ErrorCode::OK)
+        {
+          return ErrorCode::FAILED;
+        }
+        if (timeout-- == 0)
+        {
+          return ErrorCode::BUSY;
+        }
+      }
+
+      sent += DL_I2C_fillControllerTXFIFO(res_.instance, data + sent,
+                                          static_cast<uint16_t>(size - sent));
+    }
+
+    ans = WaitBusIdle();
+    if (ans != ErrorCode::OK)
+    {
+      return ans;
+    }
+
+    return CheckControllerError();
+  };
+
+  ErrorCode last_error = ErrorCode::FAILED;
+  for (uint32_t attempt = 0; attempt < MSPM0_I2C_POLLING_ATTEMPTS; ++attempt)
   {
-    return ans;
+    last_error = attempt_once();
+    if (last_error == ErrorCode::OK)
+    {
+      return ErrorCode::OK;
+    }
+    mspm0_i2c_recover_controller(res_.instance);
   }
 
-  return CheckControllerError();
+  return last_error;
 }
 
 ErrorCode MSPM0I2C::PollingRead7(uint16_t addr7, uint8_t* data, size_t size)
@@ -226,154 +343,250 @@ ErrorCode MSPM0I2C::PollingRead7(uint16_t addr7, uint8_t* data, size_t size)
     return ErrorCode::ARG_ERR;
   }
 
-  ErrorCode ans = WaitControllerIdle();
-  if (ans != ErrorCode::OK)
+  auto attempt_once = [&]() -> ErrorCode
   {
-    return ans;
-  }
-
-  DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
-  DL_I2C_startControllerTransfer(res_.instance, addr7, DL_I2C_CONTROLLER_DIRECTION_RX,
-                                 static_cast<uint16_t>(size));
-
-  size_t received = 0;
-  while (received < size)
-  {
-    uint32_t timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
-    while (DL_I2C_isControllerRXFIFOEmpty(res_.instance))
+    ErrorCode ans = WaitControllerIdle();
+    if (ans != ErrorCode::OK)
     {
-      if (CheckControllerError() != ErrorCode::OK)
+      return ans;
+    }
+
+    DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
+    DL_I2C_startControllerTransfer(res_.instance, addr7, DL_I2C_CONTROLLER_DIRECTION_RX,
+                                   static_cast<uint16_t>(size));
+
+    size_t received = 0;
+    while (received < size)
+    {
+      uint32_t timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
+      while (DL_I2C_isControllerRXFIFOEmpty(res_.instance))
       {
-        return ErrorCode::FAILED;
+        if (CheckControllerError() != ErrorCode::OK)
+        {
+          return ErrorCode::FAILED;
+        }
+        if (timeout-- == 0)
+        {
+          return ErrorCode::BUSY;
+        }
       }
-      if (timeout-- == 0)
+
+      while (!DL_I2C_isControllerRXFIFOEmpty(res_.instance) && received < size)
       {
-        return ErrorCode::BUSY;
+        data[received++] = DL_I2C_receiveControllerData(res_.instance);
       }
     }
 
-    while (!DL_I2C_isControllerRXFIFOEmpty(res_.instance) && received < size)
+    ans = WaitBusIdle();
+    if (ans != ErrorCode::OK)
     {
-      data[received++] = DL_I2C_receiveControllerData(res_.instance);
+      return ans;
     }
-  }
 
-  ans = WaitBusIdle();
-  if (ans != ErrorCode::OK)
+    return CheckControllerError();
+  };
+
+  ErrorCode last_error = ErrorCode::FAILED;
+  for (uint32_t attempt = 0; attempt < MSPM0_I2C_POLLING_ATTEMPTS; ++attempt)
   {
-    return ans;
+    last_error = attempt_once();
+    if (last_error == ErrorCode::OK)
+    {
+      return ErrorCode::OK;
+    }
+    mspm0_i2c_recover_controller(res_.instance);
   }
 
-  return CheckControllerError();
+  return last_error;
 }
 
-ErrorCode MSPM0I2C::StartAsyncWrite(uint16_t addr7, ConstRawData write_data,
-                                    WriteOperation& op)
+ErrorCode MSPM0I2C::WaitDmaTransferDone(uint8_t channel_id) const
 {
-  if (write_data.size_ > MSPM0_I2C_MAX_TRANSFER_SIZE)
+  uint32_t timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
+  while (DL_DMA_getTransferSize(DMA, channel_id) != 0U)
   {
-    return ErrorCode::ARG_ERR;
-  }
-  if (write_data.size_ > stage_buffer_.size_)
-  {
-    return ErrorCode::ARG_ERR;
-  }
-
-  ErrorCode ans = WaitControllerIdle();
-  if (ans != ErrorCode::OK)
-  {
-    return ans;
-  }
-
-  async_mode_ = AsyncMode::TX;
-  memcpy(stage_buffer_.addr_, write_data.addr_, write_data.size_);
-  async_tx_data_ = static_cast<const uint8_t*>(stage_buffer_.addr_);
-  async_rx_data_ = nullptr;
-  async_total_ = write_data.size_;
-  async_progress_ = 0;
-  last_async_result_ = ErrorCode::BUSY;
-  write_op_ = op;
-  busy_ = true;
-
-  DL_I2C_disableInterrupt(res_.instance, 0xFFFFFFFFU);
-  DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
-
-  async_progress_ = DL_I2C_fillControllerTXFIFO(res_.instance, async_tx_data_,
-                                                static_cast<uint16_t>(async_total_));
-
-  DL_I2C_enableInterrupt(res_.instance, DL_I2C_INTERRUPT_CONTROLLER_TXFIFO_TRIGGER |
-                                            DL_I2C_INTERRUPT_CONTROLLER_TX_DONE |
-                                            DL_I2C_INTERRUPT_CONTROLLER_NACK |
-                                            DL_I2C_INTERRUPT_CONTROLLER_ARBITRATION_LOST);
-
-  DL_I2C_startControllerTransfer(res_.instance, addr7, DL_I2C_CONTROLLER_DIRECTION_TX,
-                                 static_cast<uint16_t>(async_total_));
-
-  op.MarkAsRunning();
-  if (op.type == WriteOperation::OperationType::BLOCK)
-  {
-    const ErrorCode WAIT_ANS = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-    if (WAIT_ANS != ErrorCode::OK)
+    if (CheckControllerError() != ErrorCode::OK)
     {
-      return WAIT_ANS;
+      return ErrorCode::FAILED;
     }
-    return last_async_result_;
+    if (timeout-- == 0U)
+    {
+      return ErrorCode::BUSY;
+    }
   }
   return ErrorCode::OK;
 }
 
-ErrorCode MSPM0I2C::StartAsyncRead(uint16_t addr7, RawData read_data, ReadOperation& op)
+ErrorCode MSPM0I2C::DmaWrite7(uint16_t addr7, ConstRawData write_data)
 {
+  if (write_data.size_ == 0)
+  {
+    return ErrorCode::OK;
+  }
+  if (write_data.size_ > MSPM0_I2C_MAX_TRANSFER_SIZE)
+  {
+    return ErrorCode::ARG_ERR;
+  }
+
+  auto stop_dma = [&]()
+  {
+    const uint32_t DMA_TX_MASK = mspm0_i2c_dma_channel_mask(DMA_CH_TX_CHAN_ID);
+    DL_DMA_disableChannel(DMA, DMA_CH_TX_CHAN_ID);
+    DL_DMA_clearInterruptStatus(DMA, DMA_TX_MASK);
+  };
+
+  auto attempt_once = [&]() -> ErrorCode
+  {
+    ErrorCode ans = WaitControllerIdle();
+    if (ans != ErrorCode::OK)
+    {
+      return ans;
+    }
+
+    DL_I2C_disableInterrupt(res_.instance, 0xFFFFFFFFU);
+    DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
+
+    const uint32_t DMA_TX_MASK = mspm0_i2c_dma_channel_mask(DMA_CH_TX_CHAN_ID);
+    DL_DMA_disableChannel(DMA, DMA_CH_TX_CHAN_ID);
+    DL_DMA_clearInterruptStatus(DMA, DMA_TX_MASK);
+    DL_DMA_setSrcAddr(
+        DMA, DMA_CH_TX_CHAN_ID,
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(write_data.addr_)));
+    DL_DMA_setDestAddr(DMA, DMA_CH_TX_CHAN_ID,
+                       static_cast<uint32_t>(
+                           reinterpret_cast<uintptr_t>(&res_.instance->MASTER.MTXDATA)));
+    DL_DMA_setTransferSize(DMA, DMA_CH_TX_CHAN_ID,
+                           static_cast<uint16_t>(write_data.size_));
+    DL_DMA_enableChannel(DMA, DMA_CH_TX_CHAN_ID);
+
+    DL_I2C_startControllerTransfer(res_.instance, addr7, DL_I2C_CONTROLLER_DIRECTION_TX,
+                                   static_cast<uint16_t>(write_data.size_));
+
+    ans = WaitDmaTransferDone(DMA_CH_TX_CHAN_ID);
+    if (ans != ErrorCode::OK)
+    {
+      stop_dma();
+      return ans;
+    }
+
+    ans = WaitTransactionDone();
+    if (ans != ErrorCode::OK)
+    {
+      stop_dma();
+      return ans;
+    }
+
+    ans = WaitBusIdle();
+    if (ans != ErrorCode::OK)
+    {
+      stop_dma();
+      return ans;
+    }
+
+    stop_dma();
+    return CheckControllerError();
+  };
+
+  ErrorCode last_error = ErrorCode::FAILED;
+  for (uint32_t attempt = 0; attempt < MSPM0_I2C_POLLING_ATTEMPTS; ++attempt)
+  {
+    last_error = attempt_once();
+    if (last_error == ErrorCode::OK)
+    {
+      return ErrorCode::OK;
+    }
+    mspm0_i2c_recover_controller(res_.instance);
+  }
+
+  return last_error;
+}
+
+ErrorCode MSPM0I2C::DmaRead7(uint16_t addr7, RawData read_data)
+{
+  if (read_data.size_ == 0)
+  {
+    return ErrorCode::OK;
+  }
   if (read_data.size_ > MSPM0_I2C_MAX_TRANSFER_SIZE)
   {
     return ErrorCode::ARG_ERR;
   }
 
-  ErrorCode ans = WaitControllerIdle();
-  if (ans != ErrorCode::OK)
+  auto stop_dma = [&]()
   {
-    return ans;
-  }
+    const uint32_t DMA_RX_MASK = mspm0_i2c_dma_channel_mask(DMA_CH_RX_CHAN_ID);
+    DL_DMA_disableChannel(DMA, DMA_CH_RX_CHAN_ID);
+    DL_DMA_clearInterruptStatus(DMA, DMA_RX_MASK);
+  };
 
-  async_mode_ = AsyncMode::RX;
-  async_tx_data_ = nullptr;
-  async_rx_data_ = static_cast<uint8_t*>(read_data.addr_);
-  async_total_ = read_data.size_;
-  async_progress_ = 0;
-  last_async_result_ = ErrorCode::BUSY;
-  read_op_ = op;
-  busy_ = true;
-
-  DL_I2C_disableInterrupt(res_.instance, 0xFFFFFFFFU);
-  DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
-  DL_I2C_enableInterrupt(res_.instance, DL_I2C_INTERRUPT_CONTROLLER_RXFIFO_TRIGGER |
-                                            DL_I2C_INTERRUPT_CONTROLLER_RX_DONE |
-                                            DL_I2C_INTERRUPT_CONTROLLER_NACK |
-                                            DL_I2C_INTERRUPT_CONTROLLER_ARBITRATION_LOST);
-
-  DL_I2C_startControllerTransfer(res_.instance, addr7, DL_I2C_CONTROLLER_DIRECTION_RX,
-                                 static_cast<uint16_t>(async_total_));
-
-  op.MarkAsRunning();
-  if (op.type == ReadOperation::OperationType::BLOCK)
+  auto attempt_once = [&]() -> ErrorCode
   {
-    const ErrorCode WAIT_ANS = op.data.sem_info.sem->Wait(op.data.sem_info.timeout);
-    if (WAIT_ANS != ErrorCode::OK)
+    ErrorCode ans = WaitControllerIdle();
+    if (ans != ErrorCode::OK)
     {
-      return WAIT_ANS;
+      return ans;
     }
-    return last_async_result_;
+
+    DL_I2C_disableInterrupt(res_.instance, 0xFFFFFFFFU);
+    DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
+
+    const uint32_t DMA_RX_MASK = mspm0_i2c_dma_channel_mask(DMA_CH_RX_CHAN_ID);
+    DL_DMA_disableChannel(DMA, DMA_CH_RX_CHAN_ID);
+    DL_DMA_clearInterruptStatus(DMA, DMA_RX_MASK);
+    DL_DMA_setSrcAddr(DMA, DMA_CH_RX_CHAN_ID,
+                      static_cast<uint32_t>(
+                          reinterpret_cast<uintptr_t>(&res_.instance->MASTER.MRXDATA)));
+    DL_DMA_setDestAddr(
+        DMA, DMA_CH_RX_CHAN_ID,
+        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(read_data.addr_)));
+    DL_DMA_setTransferSize(DMA, DMA_CH_RX_CHAN_ID,
+                           static_cast<uint16_t>(read_data.size_));
+    DL_DMA_enableChannel(DMA, DMA_CH_RX_CHAN_ID);
+
+    DL_I2C_startControllerTransfer(res_.instance, addr7, DL_I2C_CONTROLLER_DIRECTION_RX,
+                                   static_cast<uint16_t>(read_data.size_));
+
+    ans = WaitDmaTransferDone(DMA_CH_RX_CHAN_ID);
+    if (ans != ErrorCode::OK)
+    {
+      stop_dma();
+      return ans;
+    }
+
+    ans = WaitTransactionDone();
+    if (ans != ErrorCode::OK)
+    {
+      stop_dma();
+      return ans;
+    }
+
+    ans = WaitBusIdle();
+    if (ans != ErrorCode::OK)
+    {
+      stop_dma();
+      return ans;
+    }
+
+    stop_dma();
+    return CheckControllerError();
+  };
+
+  ErrorCode last_error = ErrorCode::FAILED;
+  for (uint32_t attempt = 0; attempt < MSPM0_I2C_POLLING_ATTEMPTS; ++attempt)
+  {
+    last_error = attempt_once();
+    if (last_error == ErrorCode::OK)
+    {
+      return ErrorCode::OK;
+    }
+    mspm0_i2c_recover_controller(res_.instance);
   }
-  return ErrorCode::OK;
+
+  return last_error;
 }
 
 ErrorCode MSPM0I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& op)
 {
-  if (busy_)
-  {
-    return ErrorCode::BUSY;
-  }
-
   if (read_data.size_ == 0)
   {
     if (op.type != ReadOperation::OperationType::BLOCK)
@@ -384,14 +597,16 @@ ErrorCode MSPM0I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
   }
 
   const uint16_t ADDR7 = mspm0_i2c_to_addr7(slave_addr);
-
-  if (read_data.size_ > irq_enable_min_size_)
+  ErrorCode ans = ErrorCode::NOT_SUPPORT;
+  if (dma_enabled_ && read_data.size_ > dma_enable_min_size_)
   {
-    return StartAsyncRead(ADDR7, read_data, op);
+    ans = DmaRead7(ADDR7, read_data);
+  }
+  else
+  {
+    ans = PollingRead7(ADDR7, static_cast<uint8_t*>(read_data.addr_), read_data.size_);
   }
 
-  ErrorCode ans =
-      PollingRead7(ADDR7, static_cast<uint8_t*>(read_data.addr_), read_data.size_);
   if (op.type != ReadOperation::OperationType::BLOCK)
   {
     op.UpdateStatus(false, ans);
@@ -402,11 +617,6 @@ ErrorCode MSPM0I2C::Read(uint16_t slave_addr, RawData read_data, ReadOperation& 
 ErrorCode MSPM0I2C::Write(uint16_t slave_addr, ConstRawData write_data,
                           WriteOperation& op)
 {
-  if (busy_)
-  {
-    return ErrorCode::BUSY;
-  }
-
   if (write_data.size_ == 0)
   {
     if (op.type != WriteOperation::OperationType::BLOCK)
@@ -417,14 +627,17 @@ ErrorCode MSPM0I2C::Write(uint16_t slave_addr, ConstRawData write_data,
   }
 
   const uint16_t ADDR7 = mspm0_i2c_to_addr7(slave_addr);
-
-  if (write_data.size_ > irq_enable_min_size_)
+  ErrorCode ans = ErrorCode::NOT_SUPPORT;
+  if (dma_enabled_ && write_data.size_ > dma_enable_min_size_)
   {
-    return StartAsyncWrite(ADDR7, write_data, op);
+    ans = DmaWrite7(ADDR7, write_data);
+  }
+  else
+  {
+    ans = PollingWrite7(ADDR7, static_cast<const uint8_t*>(write_data.addr_),
+                        write_data.size_);
   }
 
-  ErrorCode ans = PollingWrite7(ADDR7, static_cast<const uint8_t*>(write_data.addr_),
-                                write_data.size_);
   if (op.type != WriteOperation::OperationType::BLOCK)
   {
     op.UpdateStatus(false, ans);
@@ -436,11 +649,6 @@ ErrorCode MSPM0I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
                              ConstRawData write_data, WriteOperation& op,
                              MemAddrLength mem_addr_size)
 {
-  if (busy_)
-  {
-    return ErrorCode::BUSY;
-  }
-
   const size_t ADDR_SIZE = (mem_addr_size == MemAddrLength::BYTE_8) ? 1 : 2;
   const size_t TOTAL_SIZE = ADDR_SIZE + write_data.size_;
   if (TOTAL_SIZE > stage_buffer_.size_)
@@ -463,23 +671,12 @@ ErrorCode MSPM0I2C::MemWrite(uint16_t slave_addr, uint16_t mem_addr,
     memcpy(tx + ADDR_SIZE, write_data.addr_, write_data.size_);
   }
 
-  ErrorCode ans = PollingWrite7(mspm0_i2c_to_addr7(slave_addr), tx, TOTAL_SIZE);
-
-  if (op.type != WriteOperation::OperationType::BLOCK)
-  {
-    op.UpdateStatus(false, ans);
-  }
-  return ans;
+  return Write(slave_addr, ConstRawData(tx, TOTAL_SIZE), op);
 }
 
 ErrorCode MSPM0I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read_data,
                             ReadOperation& op, MemAddrLength mem_addr_size)
 {
-  if (busy_)
-  {
-    return ErrorCode::BUSY;
-  }
-
   if (read_data.size_ > MSPM0_I2C_MAX_TRANSFER_SIZE)
   {
     return ErrorCode::ARG_ERR;
@@ -511,227 +708,134 @@ ErrorCode MSPM0I2C::MemRead(uint16_t slave_addr, uint16_t mem_addr, RawData read
     addr_bytes[1] = static_cast<uint8_t>(mem_addr & 0xFF);
   }
 
-  ErrorCode ans = WaitControllerIdle();
-  if (ans != ErrorCode::OK)
+  auto finalize = [&](ErrorCode code)
   {
-    return ans;
-  }
+    if (op.type != ReadOperation::OperationType::BLOCK)
+    {
+      op.UpdateStatus(false, code);
+    }
+    return code;
+  };
 
-  DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
-
-  const uint16_t ADDR_SENT = DL_I2C_fillControllerTXFIFO(
-      res_.instance, addr_bytes, static_cast<uint16_t>(ADDR_SIZE));
-  if (ADDR_SENT != ADDR_SIZE)
+  auto try_repeated_start = [&]() -> ErrorCode
   {
-    return ErrorCode::FAILED;
-  }
+    ErrorCode ans = WaitControllerIdle();
+    if (ans != ErrorCode::OK)
+    {
+      return ans;
+    }
 
-  DL_I2C_startControllerTransferAdvanced(
-      res_.instance, ADDR7, DL_I2C_CONTROLLER_DIRECTION_TX,
-      static_cast<uint16_t>(ADDR_SIZE), DL_I2C_CONTROLLER_START_ENABLE,
-      DL_I2C_CONTROLLER_STOP_DISABLE, DL_I2C_CONTROLLER_ACK_ENABLE);
+    DL_I2C_clearInterruptStatus(res_.instance, 0xFFFFFFFFU);
 
-  ans = WaitTransactionDone();
-  if (ans != ErrorCode::OK)
-  {
-    return ans;
-  }
-  if (CheckControllerError() != ErrorCode::OK)
-  {
-    return ErrorCode::FAILED;
-  }
+    const uint16_t ADDR_SENT = DL_I2C_fillControllerTXFIFO(
+        res_.instance, addr_bytes, static_cast<uint16_t>(ADDR_SIZE));
+    if (ADDR_SENT != ADDR_SIZE)
+    {
+      return ErrorCode::FAILED;
+    }
 
-  DL_I2C_startControllerTransferAdvanced(
-      res_.instance, ADDR7, DL_I2C_CONTROLLER_DIRECTION_RX,
-      static_cast<uint16_t>(read_data.size_), DL_I2C_CONTROLLER_START_ENABLE,
-      DL_I2C_CONTROLLER_STOP_ENABLE, DL_I2C_CONTROLLER_ACK_ENABLE);
+    DL_I2C_startControllerTransferAdvanced(
+        res_.instance, ADDR7, DL_I2C_CONTROLLER_DIRECTION_TX,
+        static_cast<uint16_t>(ADDR_SIZE), DL_I2C_CONTROLLER_START_ENABLE,
+        DL_I2C_CONTROLLER_STOP_DISABLE, DL_I2C_CONTROLLER_ACK_ENABLE);
 
-  size_t received = 0;
-  auto* read_ptr = static_cast<uint8_t*>(read_data.addr_);
-  while (received < read_data.size_)
-  {
-    uint32_t timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
-    while (DL_I2C_isControllerRXFIFOEmpty(res_.instance))
+    uint32_t tx_done_timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
+    while (DL_I2C_getRawInterruptStatus(res_.instance,
+                                        DL_I2C_INTERRUPT_CONTROLLER_TX_DONE) == 0U)
     {
       if (CheckControllerError() != ErrorCode::OK)
       {
         return ErrorCode::FAILED;
       }
-      if (timeout-- == 0)
+      if (tx_done_timeout-- == 0U)
       {
         return ErrorCode::BUSY;
       }
     }
+    DL_I2C_clearInterruptStatus(res_.instance, DL_I2C_INTERRUPT_CONTROLLER_TX_DONE);
 
-    while (!DL_I2C_isControllerRXFIFOEmpty(res_.instance) && received < read_data.size_)
+    if (CheckControllerError() != ErrorCode::OK)
     {
-      read_ptr[received++] = DL_I2C_receiveControllerData(res_.instance);
-    }
-  }
-
-  ans = WaitBusIdle();
-  if (ans != ErrorCode::OK)
-  {
-    return ans;
-  }
-
-  ans = CheckControllerError();
-  if (op.type != ReadOperation::OperationType::BLOCK)
-  {
-    op.UpdateStatus(false, ans);
-  }
-  return ans;
-}
-
-void MSPM0I2C::FinishAsync(ErrorCode code)
-{
-  const AsyncMode LAST_MODE = async_mode_;
-  last_async_result_ = code;
-
-  DL_I2C_disableInterrupt(res_.instance, MSPM0_I2C_ASYNC_INTERRUPT_MASK);
-  DL_I2C_clearInterruptStatus(res_.instance, MSPM0_I2C_ASYNC_INTERRUPT_MASK);
-
-  if (code != ErrorCode::OK)
-  {
-    DL_I2C_resetControllerTransfer(res_.instance);
-    DL_I2C_enableController(res_.instance);
-  }
-
-  busy_ = false;
-  async_mode_ = AsyncMode::NONE;
-  async_rx_data_ = nullptr;
-  async_tx_data_ = nullptr;
-  async_total_ = 0;
-  async_progress_ = 0;
-
-  if (LAST_MODE == AsyncMode::RX)
-  {
-    read_op_.UpdateStatus(true, code);
-  }
-  else if (LAST_MODE == AsyncMode::TX)
-  {
-    write_op_.UpdateStatus(true, code);
-  }
-}
-
-void MSPM0I2C::HandleInterrupt()
-{
-  for (uint32_t round = 0; round < MSPM0_I2C_MAX_ISR_ROUNDS; ++round)
-  {
-    const DL_I2C_IIDX IIDX = DL_I2C_getPendingInterrupt(res_.instance);
-    if (IIDX == DL_I2C_IIDX_NO_INT)
-    {
-      return;
+      return ErrorCode::FAILED;
     }
 
-    switch (IIDX)
+    DL_I2C_startControllerTransferAdvanced(
+        res_.instance, ADDR7, DL_I2C_CONTROLLER_DIRECTION_RX,
+        static_cast<uint16_t>(read_data.size_), DL_I2C_CONTROLLER_START_ENABLE,
+        DL_I2C_CONTROLLER_STOP_ENABLE, DL_I2C_CONTROLLER_ACK_DISABLE);
+
+    size_t received = 0;
+    auto* read_ptr = static_cast<uint8_t*>(read_data.addr_);
+    while (received < read_data.size_)
     {
-      case DL_I2C_IIDX_CONTROLLER_TXFIFO_TRIGGER:
-        if (async_mode_ == AsyncMode::TX)
+      uint32_t timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
+      while (DL_I2C_isControllerRXFIFOEmpty(res_.instance))
+      {
+        if (CheckControllerError() != ErrorCode::OK)
         {
-          async_progress_ += DL_I2C_fillControllerTXFIFO(
-              res_.instance, async_tx_data_ + async_progress_,
-              static_cast<uint16_t>(async_total_ - async_progress_));
+          return ErrorCode::FAILED;
         }
-        break;
-
-      case DL_I2C_IIDX_CONTROLLER_RXFIFO_TRIGGER:
-        if (async_mode_ == AsyncMode::RX)
+        if (timeout-- == 0)
         {
-          while (!DL_I2C_isControllerRXFIFOEmpty(res_.instance) &&
-                 async_progress_ < async_total_)
-          {
-            async_rx_data_[async_progress_++] =
-                DL_I2C_receiveControllerData(res_.instance);
-          }
+          return ErrorCode::BUSY;
         }
-        break;
+      }
 
-      case DL_I2C_IIDX_CONTROLLER_TX_DONE:
-        if (async_mode_ == AsyncMode::TX && async_progress_ == async_total_)
-        {
-          FinishAsync(CheckControllerError());
-          return;
-        }
-        FinishAsync(ErrorCode::FAILED);
-        return;
-
-      case DL_I2C_IIDX_CONTROLLER_RX_DONE:
-        if (async_mode_ == AsyncMode::RX)
-        {
-          while (!DL_I2C_isControllerRXFIFOEmpty(res_.instance) &&
-                 async_progress_ < async_total_)
-          {
-            async_rx_data_[async_progress_++] =
-                DL_I2C_receiveControllerData(res_.instance);
-          }
-
-          if (async_progress_ == async_total_)
-          {
-            FinishAsync(CheckControllerError());
-          }
-          else
-          {
-            FinishAsync(ErrorCode::FAILED);
-          }
-          return;
-        }
-        FinishAsync(ErrorCode::FAILED);
-        return;
-
-      case DL_I2C_IIDX_CONTROLLER_NACK:
-      case DL_I2C_IIDX_CONTROLLER_ARBITRATION_LOST:
-        FinishAsync(ErrorCode::FAILED);
-        return;
-
-      default:
-        break;
+      while (!DL_I2C_isControllerRXFIFOEmpty(res_.instance) && received < read_data.size_)
+      {
+        read_ptr[received++] = DL_I2C_receiveControllerData(res_.instance);
+      }
     }
-  }
 
-  FinishAsync(ErrorCode::FAILED);
-}
+    uint32_t rx_done_timeout = MSPM0_I2C_WAIT_FIFO_TIMEOUT;
+    while (DL_I2C_getRawInterruptStatus(res_.instance,
+                                        DL_I2C_INTERRUPT_CONTROLLER_RX_DONE) == 0U)
+    {
+      if (CheckControllerError() != ErrorCode::OK)
+      {
+        return ErrorCode::FAILED;
+      }
+      if (rx_done_timeout-- == 0U)
+      {
+        return ErrorCode::BUSY;
+      }
+    }
+    DL_I2C_clearInterruptStatus(res_.instance, DL_I2C_INTERRUPT_CONTROLLER_RX_DONE);
 
-void MSPM0I2C::OnInterrupt(uint8_t index)
-{
-  if (index >= MAX_I2C_INSTANCES)
+    ans = WaitBusIdle();
+    if (ans != ErrorCode::OK)
+    {
+      return ans;
+    }
+
+    return CheckControllerError();
+  };
+
+  ErrorCode last_error = ErrorCode::FAILED;
+  for (uint32_t attempt = 0; attempt < MSPM0_I2C_MEMREAD_RS_ATTEMPTS; ++attempt)
   {
-    return;
+    last_error = try_repeated_start();
+    if (last_error == ErrorCode::OK)
+    {
+      return finalize(ErrorCode::OK);
+    }
+    mspm0_i2c_recover_controller(res_.instance);
   }
 
-  MSPM0I2C* i2c = instance_map_[index];
-  if (i2c == nullptr)
+  for (uint32_t attempt = 0; attempt < MSPM0_I2C_MEMREAD_FALLBACK_ATTEMPTS; ++attempt)
   {
-    return;
+    last_error = PollingWrite7(ADDR7, addr_bytes, ADDR_SIZE);
+    if (last_error == ErrorCode::OK)
+    {
+      last_error =
+          PollingRead7(ADDR7, static_cast<uint8_t*>(read_data.addr_), read_data.size_);
+      if (last_error == ErrorCode::OK)
+      {
+        return finalize(ErrorCode::OK);
+      }
+    }
+    mspm0_i2c_recover_controller(res_.instance);
   }
 
-  i2c->HandleInterrupt();
+  return finalize(last_error);
 }
-
-#if defined(I2C0_BASE)
-extern "C" void I2C0_IRQHandler(void)  // NOLINT
-{
-  LibXR::MSPM0I2C::OnInterrupt(0);
-}
-#endif
-
-#if defined(I2C1_BASE)
-extern "C" void I2C1_IRQHandler(void)  // NOLINT
-{
-  LibXR::MSPM0I2C::OnInterrupt(1);
-}
-#endif
-
-#if defined(I2C2_BASE)
-extern "C" void I2C2_IRQHandler(void)  // NOLINT
-{
-  LibXR::MSPM0I2C::OnInterrupt(2);
-}
-#endif
-
-#if defined(I2C3_BASE)
-extern "C" void I2C3_IRQHandler(void)  // NOLINT
-{
-  LibXR::MSPM0I2C::OnInterrupt(3);
-}
-#endif

@@ -19,7 +19,7 @@ class MSPM0I2C : public I2C
     uint8_t index;
   };
 
-  MSPM0I2C(Resources res, RawData stage_buffer, uint32_t irq_enable_min_size = 8,
+  MSPM0I2C(Resources res, RawData stage_buffer, uint32_t dma_enable_min_size = 8,
            I2C::Configuration config = {100000});
 
   ErrorCode Read(uint16_t slave_addr, RawData read_data, ReadOperation& op) override;
@@ -35,8 +35,6 @@ class MSPM0I2C : public I2C
                      MemAddrLength mem_addr_size = MemAddrLength::BYTE_8) override;
 
   ErrorCode SetConfig(Configuration config) override;
-
-  static void OnInterrupt(uint8_t index);
 
   static constexpr uint8_t ResolveIndex(IRQn_Type irqn)
   {
@@ -64,13 +62,6 @@ class MSPM0I2C : public I2C
   }
 
  private:
-  enum class AsyncMode : uint8_t
-  {
-    NONE,
-    TX,
-    RX,
-  };
-
   static constexpr uint8_t MAX_I2C_INSTANCES = 4;
   static constexpr uint8_t INVALID_INSTANCE_INDEX = 0xFF;
 
@@ -86,28 +77,16 @@ class MSPM0I2C : public I2C
 
   ErrorCode PollingRead7(uint16_t addr7, uint8_t* data, size_t size);
 
-  ErrorCode StartAsyncRead(uint16_t addr7, RawData read_data, ReadOperation& op);
+  ErrorCode DmaWrite7(uint16_t addr7, ConstRawData write_data);
 
-  ErrorCode StartAsyncWrite(uint16_t addr7, ConstRawData write_data, WriteOperation& op);
+  ErrorCode DmaRead7(uint16_t addr7, RawData read_data);
 
-  void HandleInterrupt();
-
-  void FinishAsync(ErrorCode code);
+  ErrorCode WaitDmaTransferDone(uint8_t channel_id) const;
 
   Resources res_;
   RawData stage_buffer_;
-  uint32_t irq_enable_min_size_;
-  volatile bool busy_ = false;
-  AsyncMode async_mode_ = AsyncMode::NONE;
-  uint8_t* async_rx_data_ = nullptr;
-  const uint8_t* async_tx_data_ = nullptr;
-  size_t async_total_ = 0;
-  size_t async_progress_ = 0;
-  volatile ErrorCode last_async_result_ = ErrorCode::OK;
-  ReadOperation read_op_;
-  WriteOperation write_op_;
-
-  static MSPM0I2C* instance_map_[MAX_I2C_INSTANCES];
+  uint32_t dma_enable_min_size_;
+  bool dma_enabled_ = false;
 };
 
 #define MSPM0_I2C_INIT(name, stage_addr, stage_size, irq_min_size)                          \
