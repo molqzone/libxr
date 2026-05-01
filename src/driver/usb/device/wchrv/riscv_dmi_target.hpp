@@ -289,26 +289,32 @@ class RiscvDmiTarget
 
   bool ReadWordByWchFast(uint32_t addr, uint32_t& data)
   {
-    EndMemoryWriteSession();
+    if (memory_write_session_.active)
+    {
+      EndMemoryWriteSession();
+    }
     if ((addr & 0x3u) != 0u)
     {
       return false;
     }
 
     return DmiWriteWord(DMI_DATA1, addr) && DmiWriteWord(DMI_COMMAND, COMMAND_WCH_READ_MEM32) &&
-           WaitAbstractCommandDone() && DmiReadWord(DMI_DATA0, data);
+           DmiReadWord(DMI_DATA0, data);
   }
 
   bool WriteWordByWchFast(uint32_t addr, uint32_t data)
   {
-    EndMemoryWriteSession();
+    if (memory_write_session_.active)
+    {
+      EndMemoryWriteSession();
+    }
     if ((addr & 0x3u) != 0u)
     {
       return false;
     }
 
     return DmiWriteWord(DMI_DATA1, addr) && DmiWriteWord(DMI_DATA0, data) &&
-           DmiWriteWord(DMI_COMMAND, COMMAND_WCH_WRITE_MEM32) && WaitAbstractCommandDone();
+           DmiWriteWord(DMI_COMMAND, COMMAND_WCH_WRITE_MEM32);
   }
 
   bool WriteWordByWchFastVerified(uint32_t addr, uint32_t data)
@@ -320,7 +326,10 @@ class RiscvDmiTarget
 
   bool RunWchCustomCommand(uint32_t data1, uint32_t command)
   {
-    EndMemoryWriteSession();
+    if (memory_write_session_.active)
+    {
+      EndMemoryWriteSession();
+    }
     return DmiWriteWord(DMI_DATA1, data1) && DmiWriteWord(DMI_COMMAND, command) &&
            WaitAbstractCommandDone();
   }
@@ -472,14 +481,14 @@ class RiscvDmiTarget
 
   void EndMemoryWriteSession()
   {
+    if (!memory_write_session_.active)
+    {
+      return;
+    }
+
     // Always restore ABSTRACTAUTO so a stale autoexec bit left by an earlier
     // session cannot poison later abstract reads on a fresh probe attach.
-    uint32_t restored_abstractauto = 0u;
-    if (memory_write_session_.active)
-    {
-      restored_abstractauto = memory_write_session_.abstractauto_saved;
-    }
-    (void)DmiWriteWord(DMI_ABSTRACTAUTO, restored_abstractauto);
+    (void)DmiWriteWord(DMI_ABSTRACTAUTO, memory_write_session_.abstractauto_saved);
     memory_write_session_ = {};
     (void)ClearAbstractCommandError();
   }
@@ -510,7 +519,7 @@ class RiscvDmiTarget
                                 (static_cast<uint32_t>(data[off + 1u]) << 8u) |
                                 (static_cast<uint32_t>(data[off + 2u]) << 16u) |
                                 (static_cast<uint32_t>(data[off + 3u]) << 24u);
-          if (!streaming && WriteWordByWchFastVerified(STREAM_ADDR, WORD))
+          if (!streaming && WriteWordByWchFast(STREAM_ADDR, WORD))
           {
             off += 4u;
             continue;
