@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 
 #include "debug/rvswd.hpp"
 #include "dev_core.hpp"
@@ -63,6 +64,7 @@ class WchLinkRvClass : public DeviceClass
     uint32_t dpc = 0u;
     uint32_t mepc = 0u;
     uint32_t mcause = 0u;
+    uint32_t saved_mtvec = 0u;
     uint32_t run_entry = 0u;
     uint32_t run_sp = 0u;
     uint32_t run_flags = 0u;
@@ -432,7 +434,6 @@ class WchLinkRvClass : public DeviceClass
         return;
       }
       flash_stream_received_bytes_ += ACCEPT_BYTES;
-      QueueFlashWriteAcks();
       (void)ArmDataOutForStreamIfIdle();
       return;
     }
@@ -553,6 +554,8 @@ class WchLinkRvClass : public DeviceClass
     read_stream_error_ = false;
     flash_stream_ack_code_ = DATA_ACK_CODE_STREAM;
     flash_erase_requested_ = false;
+    flash_register_erase_done_ = false;
+    flash_stream_erase_pending_ = false;
     power_3v3_enabled_ = false;
     power_5v_enabled_ = false;
     rstout_state_ = 0u;
@@ -952,11 +955,29 @@ class WchLinkRvClass : public DeviceClass
 
   uint8_t ResolveReportedChipFamily(uint32_t chip_id) const
   {
+    const uint8_t DETECTED_FAMILY =
+        RiscvDmiTarget<RvSwdPort>::DetectWchChipFamilyFromChipId(chip_id);
+    if (DETECTED_FAMILY != 0u)
+    {
+      return DETECTED_FAMILY;
+    }
+
+    switch (target_state_.flash_size_kb)
+    {
+      case 192u:
+      case 224u:
+      case 256u:
+      case 288u:
+        return 0x06u;
+      default:
+        break;
+    }
+
     if (target_state_.requested_family != 0u)
     {
       return target_state_.requested_family;
     }
-    return RiscvDmiTarget<RvSwdPort>::DetectWchChipFamilyFromChipId(chip_id);
+    return 0u;
   }
 
   static uint32_t ProvisionalChipIdForFamily(uint8_t chip_family)
@@ -1104,7 +1125,21 @@ class WchLinkRvClass : public DeviceClass
 
   bool FlashStreamStageHasRoom() const
   {
-    return flash_stream_stage_size_ < static_cast<uint16_t>(flash_stream_stage_.size());
+    if (flash_stream_stage_size_ >= static_cast<uint16_t>(flash_stream_stage_.size()))
+    {
+      return false;
+    }
+
+    uint32_t remain_total = DATA_PACKET_SIZE;
+    if (program_mode_ == ProgramMode::WRITE_FLASH_STREAM &&
+        flash_stream_total_raw_bytes_ > flash_stream_received_bytes_)
+    {
+      remain_total = flash_stream_total_raw_bytes_ - flash_stream_received_bytes_;
+    }
+
+    const uint32_t NEXT_OUT_BYTES = MinU32(DATA_PACKET_SIZE, remain_total);
+    return (static_cast<uint32_t>(flash_stream_stage_.size()) - flash_stream_stage_size_) >=
+           NEXT_OUT_BYTES;
   }
 
   bool QueueFlashStreamData(const uint8_t* data, uint32_t size)
@@ -1200,6 +1235,7 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_ack_code_ = DATA_ACK_CODE_STREAM;
     flash_stream_writer_active_ = false;
     flash_stream_writer_supported_ = false;
+    flash_stream_erase_pending_ = false;
     pending_data_ack_ = 0u;
     data_ack_in_flight_ = false;
     flash_stream_stage_head_ = 0u;
@@ -1239,6 +1275,7 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_ack_code_ = DATA_ACK_CODE_STREAM;
     flash_stream_writer_active_ = false;
     flash_stream_writer_supported_ = false;
+    flash_stream_erase_pending_ = false;
     pending_data_ack_ = 0u;
     data_ack_in_flight_ = false;
     flash_stream_stage_head_ = 0u;
@@ -1271,6 +1308,7 @@ class WchLinkRvClass : public DeviceClass
     flash_stream_write_addr_ = write_region_addr_;
     flash_stream_error_ = false;
     flash_stream_ack_code_ = flash_erase_requested_ ? DATA_ACK_CODE_ERASE : DATA_ACK_CODE_STREAM;
+    flash_stream_erase_pending_ = flash_erase_requested_ || IsWchV3LikeTarget();
     flash_stream_writer_active_ = false;
     flash_stream_writer_supported_ = true;
     flash_erase_requested_ = false;
@@ -1317,6 +1355,7 @@ class WchLinkRvClass : public DeviceClass
       return;
     }
     flash_stream_rx_bytes_ += CONSUME_BYTES;
+    QueueFlashWriteAcks();
     if (flash_stream_rx_bytes_ >= flash_stream_total_raw_bytes_ && !FinalizeFlashWriteStream())
     {
       if (!flash_stream_error_)
@@ -1403,13 +1442,12 @@ class WchLinkRvClass : public DeviceClass
       return true;
     }
 
-    const uint32_t NEXT_HOST_CHUNK_BYTES = NextFlashHostChunkBytes();
-    if (NEXT_HOST_CHUNK_BYTES == 0u)
+    if (NextFlashHostChunkBytes() == 0u)
     {
       return true;
     }
 
-    return static_cast<uint32_t>(flash_stream_stage_size_) + NEXT_HOST_CHUNK_BYTES <=
+    return static_cast<uint32_t>(flash_stream_stage_size_) + DATA_PACKET_SIZE <=
            static_cast<uint32_t>(flash_stream_stage_.size());
   }
 
@@ -1522,7 +1560,11 @@ class WchLinkRvClass : public DeviceClass
     if (max_ram_addr != 0u)
     {
       layout.verify_sum_addr = ((max_ram_addr & 0xFFu) == 0u) ? (max_ram_addr + 0x10u) : max_ram_addr;
-      layout.stack_addr = AlignUpU32(layout.verify_sum_addr + 0x400u, 0x100u);
+      const uint32_t DETECTED_STACK_ADDR = AlignUpU32(layout.verify_sum_addr + 0x400u, 0x100u);
+      if (DETECTED_STACK_ADDR > layout.stack_addr)
+      {
+        layout.stack_addr = DETECTED_STACK_ADDR;
+      }
     }
     return true;
   }
@@ -1586,10 +1628,13 @@ class WchLinkRvClass : public DeviceClass
     const uint32_t HALT_POLLS = 32768u + (PAGE_COUNT * 6144u);
     uint32_t result = 0u;
     typename RiscvDmiTarget<RvSwdPort>::RunProgramDebugSnapshot run_debug = {};
-    if (!riscv_target_.RunProgramAndWaitForHalt(
-            flash_op_layout_.code_addr, result, HALT_POLLS, &run_debug))
+    const bool RUN_OK = riscv_target_.RunProgramAndWaitForHalt(
+        flash_op_layout_.code_addr, result, HALT_POLLS, &run_debug);
+
+    if (!RUN_OK)
     {
       SaveFlashLoaderDebugSnapshot(run_debug);
+      RecoverTargetDebugAfterFlashFailure();
       error_code = DATA_ACK_CODE_STREAM_LOADER_RUN_FAIL_BASE;
       return false;
     }
@@ -1646,6 +1691,10 @@ class WchLinkRvClass : public DeviceClass
 
     flash_program_flags_ = static_cast<uint8_t>(FLASH_OP_FLAG_UNLOCK | FLASH_OP_FLAG_PAGE_ERASE |
                                                 FLASH_OP_FLAG_PROGRAM | FLASH_OP_FLAG_VERIFY);
+    if (IsWchV3LikeTarget())
+    {
+      flash_program_flags_ = static_cast<uint8_t>(FLASH_OP_FLAG_PROGRAM | FLASH_OP_FLAG_VERIFY);
+    }
     if (target_state_.reported_family == 0x05u)
     {
       flash_program_flags_ = 0u;
@@ -1792,6 +1841,7 @@ class WchLinkRvClass : public DeviceClass
     debug_flash_loader_snapshot_.dpc = 0u;
     debug_flash_loader_snapshot_.mepc = 0u;
     debug_flash_loader_snapshot_.mcause = 0u;
+    debug_flash_loader_snapshot_.saved_mtvec = 0u;
     debug_flash_loader_snapshot_.run_entry = 0u;
     debug_flash_loader_snapshot_.run_sp = 0u;
     debug_flash_loader_snapshot_.run_flags = 0u;
@@ -1856,11 +1906,192 @@ class WchLinkRvClass : public DeviceClass
     return true;
   }
 
+  bool WaitTargetFlashReady(uint32_t max_polls)
+  {
+    for (uint32_t poll = 0u; poll < max_polls; ++poll)
+    {
+      uint32_t status = 0u;
+      if (riscv_target_.ReadWordByWchFast(WCH_FLASH_STATR_ADDR, status) &&
+          (status & WCH_FLASH_STATR_BUSY_MASK) == 0u)
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void RecoverTargetDebugAfterFlashFailure()
+  {
+    riscv_target_.RecoverDebugModuleAfterFault();
+    target_debug_session_active_ = false;
+    target_debug_session_needs_resume_ = false;
+  }
+
+  bool IsWchV3LikeTarget() const
+  {
+    return target_state_.reported_family == 0x06u || target_state_.reported_family == 0x86u ||
+           target_state_.requested_family == 0x06u || target_state_.requested_family == 0x86u;
+  }
+
+  bool RunWchV3PostEraseClockSequence()
+  {
+    uint32_t scratch = 0u;
+    (void)riscv_target_.ReadWordByWchFast(WCH_FLASH_OBR_ADDR, scratch);
+    (void)riscv_target_.ReadWordByWchFast(WCH_FLASH_WPR_ADDR, scratch);
+
+    static constexpr std::array<std::pair<uint32_t, uint32_t>, 15u> CLOCK_WRITES = {{
+        {WCH_RCC_CTLR_ADDR, 0x03009183u},
+        {WCH_RCC_CFGR0_ADDR, 0x00380000u},
+        {WCH_RCC_CTLR_ADDR, 0x02009183u},
+        {WCH_RCC_CTLR_ADDR, 0x00009183u},
+        {WCH_RCC_CFGR0_ADDR, 0x00000000u},
+        {WCH_RCC_INTR_ADDR, 0x00FF0000u},
+        {WCH_RCC_CFGR2_ADDR, 0x00000000u},
+        {WCH_EXTEN_CTR_ADDR, 0x00000A50u},
+        {WCH_RCC_CFGR0_ADDR, 0x00000400u},
+        {WCH_RCC_CFGR0_ADDR, 0x00380400u},
+        {WCH_RCC_CTLR_ADDR, 0x01009183u},
+        {WCH_RCC_CFGR0_ADDR, 0x00380402u},
+        {WCH_RCC_AHBPRSTR_ADDR, 0x00000000u},
+        {WCH_RCC_APB2PRSTR_ADDR, 0x00000000u},
+        {WCH_RCC_APB1PRSTR_ADDR, 0x00000000u},
+    }};
+
+    for (const auto& write : CLOCK_WRITES)
+    {
+      if (!riscv_target_.WriteWordByWchFast(write.first, write.second))
+      {
+        return false;
+      }
+      if (write.first == WCH_RCC_CFGR0_ADDR && write.second == 0x00000400u)
+      {
+        (void)riscv_target_.ReadWordByWchFast(WCH_FLASH_OBR_RELOAD_ADDR, scratch);
+      }
+    }
+
+    (void)riscv_target_.RequestHartHalt();
+    (void)riscv_target_.WriteCpuRegister(DEBUG_REG_DCSR, 0x000090C3u);
+    return riscv_target_.WriteWordByWchFast(WCH_RCC_APB1PCENR_ADDR, 0x00000000u);
+  }
+
+  bool RunWchFlashRegisterMassErase()
+  {
+    if (IsWchV3LikeTarget())
+    {
+      uint32_t dmstatus = 0u;
+      if (TryResetAndHaltHart(dmstatus))
+      {
+        target_debug_session_active_ = true;
+        target_debug_session_needs_resume_ = false;
+      }
+    }
+
+    if (!EnsureTargetDebugSession())
+    {
+      return false;
+    }
+
+    riscv_target_.EndMemoryWriteSession();
+    if (!WaitTargetFlashReady(WCH_FLASH_READY_POLL_SHORT))
+    {
+      return false;
+    }
+
+    uint32_t scratch = 0u;
+    (void)riscv_target_.RunWchCustomCommand(WCH_FLASH_FACTORY_MODE_ADDR,
+                                            WCH_FLASH_FACTORY_MODE_COMMAND);
+    (void)riscv_target_.ReadWordByWchFast(WCH_FLASH_OBR_ADDR, scratch);
+    (void)riscv_target_.ReadWordByWchFast(WCH_FLASH_WPR_ADDR, scratch);
+    (void)riscv_target_.WriteWordByWchFast(WCH_RCC_APB1PCENR_ADDR, 0u);
+
+    if (!riscv_target_.WriteWordByWchFast(WCH_FLASH_KEYR_ADDR, WCH_FLASH_KEY1) ||
+        !riscv_target_.WriteWordByWchFast(WCH_FLASH_KEYR_ADDR, WCH_FLASH_KEY2) ||
+        !riscv_target_.WriteWordByWchFast(WCH_FLASH_MODEKEYR_ADDR, WCH_FLASH_KEY1) ||
+        !riscv_target_.WriteWordByWchFast(WCH_FLASH_MODEKEYR_ADDR, WCH_FLASH_KEY2))
+    {
+      return false;
+    }
+
+    (void)riscv_target_.ReadWordByWchFast(WCH_FLASH_CTLR_ADDR, scratch);
+    if (!riscv_target_.WriteWordByWchFast(WCH_FLASH_CTLR_ADDR, WCH_FLASH_CTLR_MER) ||
+        !riscv_target_.ReadWordByWchFast(WCH_FLASH_CTLR_ADDR, scratch) ||
+        !riscv_target_.WriteWordByWchFast(WCH_FLASH_CTLR_ADDR,
+                                          WCH_FLASH_CTLR_MER | WCH_FLASH_CTLR_STRT))
+    {
+      return false;
+    }
+
+    const bool READY = WaitTargetFlashReady(WCH_FLASH_ERASE_POLL_LIMIT);
+    (void)riscv_target_.WriteWordByWchFast(WCH_FLASH_CTLR_ADDR, 0u);
+    if (!READY)
+    {
+      return false;
+    }
+
+    if (IsWchV3LikeTarget() && !riscv_target_.RunWchPostEraseSettle(WCH_POST_ERASE_DMSTATUS_POLLS))
+    {
+      return false;
+    }
+    (void)riscv_target_.WriteWordByWchFast(WCH_FLASH_STATR_ADDR,
+                                           WCH_FLASH_STATR_EOP | WCH_FLASH_STATR_WRPRTERR);
+    if (IsWchV3LikeTarget() && !RunWchV3PostEraseClockSequence())
+    {
+      return false;
+    }
+    target_debug_session_needs_resume_ = false;
+    return true;
+  }
+
+  bool RunPendingFlashMassErase()
+  {
+    if (!flash_stream_erase_pending_)
+    {
+      return true;
+    }
+    if (!flash_op_prepared_)
+    {
+      return false;
+    }
+
+    if (!flash_register_erase_done_)
+    {
+      if (!RunWchFlashRegisterMassErase())
+      {
+        SetFlashStreamError(DATA_ACK_CODE_STREAM_LOADER_RUN_FAIL_BASE);
+        return false;
+      }
+      flash_register_erase_done_ = true;
+    }
+
+    uint8_t loader_error_code = DATA_ACK_CODE_STREAM_LOADER_RUN_FAIL_BASE;
+    const uint8_t ERASE_FLAGS =
+        static_cast<uint8_t>(FLASH_OP_FLAG_UNLOCK | FLASH_OP_FLAG_MASS_ERASE);
+    if (!RunFlashLoader(ERASE_FLAGS, 0u, 0u, loader_error_code))
+    {
+      SetFlashStreamError(loader_error_code);
+      return false;
+    }
+
+    flash_stream_erase_pending_ = false;
+    flash_register_erase_done_ = false;
+    return true;
+  }
+
   bool WriteFlashStreamChunk(const uint8_t* data, uint32_t size)
   {
     if (!data || size == 0u)
     {
       return true;
+    }
+
+    if (flash_stream_erase_pending_ && !flash_register_erase_done_)
+    {
+      if (!RunWchFlashRegisterMassErase())
+      {
+        SetFlashStreamError(DATA_ACK_CODE_STREAM_LOADER_RUN_FAIL_BASE);
+        return false;
+      }
+      flash_register_erase_done_ = true;
     }
 
     if (flash_op_ready_ && !flash_op_prepared_)
@@ -1869,6 +2100,11 @@ class WchLinkRvClass : public DeviceClass
       {
         return false;
       }
+    }
+
+    if (!RunPendingFlashMassErase())
+    {
+      return false;
     }
 
     if (flash_op_prepared_)
@@ -2218,9 +2454,6 @@ class WchLinkRvClass : public DeviceClass
       }
 
       target_state_.chip_id = chip_id;
-      target_state_.reported_family = ResolveReportedChipFamily(chip_id);
-      RefreshCompatDescriptorFromState();
-
       attached_ = true;
       dmi_needs_warmup_ = provisional_attach;
       session_state_ = SessionState::ACTIVE;
@@ -2231,6 +2464,8 @@ class WchLinkRvClass : public DeviceClass
           (void)RefreshTargetFlashCompatState();
         }
       }
+      target_state_.reported_family = ResolveReportedChipFamily(chip_id);
+      RefreshCompatDescriptorFromState();
 
       const uint8_t ATTACH_INFO[5] = {
           target_state_.reported_family,
@@ -2418,6 +2653,12 @@ class WchLinkRvClass : public DeviceClass
       ExitReadStream();
       EndTargetDebugSession();
       flash_erase_requested_ = true;
+      flash_register_erase_done_ = false;
+      if (!RunWchFlashRegisterMassErase())
+      {
+        return BuildErrorResponse(0x55u, resp, cap, out_len);
+      }
+      flash_register_erase_done_ = true;
     }
     else if (SUB_CMD == 0x06u)
     {
@@ -2473,6 +2714,7 @@ class WchLinkRvClass : public DeviceClass
       data_ack_in_flight_ = false;
       ExitProgramStream();
       flash_erase_requested_ = false;
+      flash_register_erase_done_ = false;
     }
     else if (SUB_CMD == 0x0Cu)
     {
@@ -2489,6 +2731,7 @@ class WchLinkRvClass : public DeviceClass
     else if (SUB_CMD == 0x09u || SUB_CMD == 0x01u)
     {
       flash_erase_requested_ = false;
+      flash_register_erase_done_ = false;
       ExitProgramStream();
       ExitReadStream();
       EndTargetDebugSession();
@@ -2626,6 +2869,33 @@ class WchLinkRvClass : public DeviceClass
           StoreBe32(debug_payload.data() + 15u, rvswd_.GetLastOnlineCaprNoTurnValue());
           debug_payload[19] = rvswd_.HasLastOnlineCapr() ? 1u : 0u;
           debug_payload[20] = rvswd_.HasLastTargetFrame() ? 1u : 0u;
+          return BuildStandardResponse(
+              0x11u, debug_payload.data(), static_cast<uint16_t>(debug_payload.size()), resp, cap,
+              out_len);
+        }
+        if (PAYLOAD_LEN == 1u && payload[0] == 0x86u)
+        {
+          std::array<uint8_t, 58u> debug_payload = {};
+          debug_payload[0] = 0x86u;
+          debug_payload[1] = debug_flash_loader_snapshot_.failure_stage;
+          debug_payload[2] = debug_flash_loader_snapshot_.resume_ack_seen;
+          debug_payload[3] = debug_flash_loader_snapshot_.hart_halted_seen;
+          debug_payload[4] = debug_flash_loader_snapshot_.a0_valid;
+          StoreBe32(debug_payload.data() + 5u, debug_flash_loader_snapshot_.dmstatus_before_resume);
+          StoreBe32(debug_payload.data() + 9u, debug_flash_loader_snapshot_.dmstatus_after_resume);
+          StoreBe32(debug_payload.data() + 13u, debug_flash_loader_snapshot_.dmstatus_timeout_last);
+          StoreBe32(debug_payload.data() + 17u, debug_flash_loader_snapshot_.dmstatus_after_halt);
+          StoreBe32(debug_payload.data() + 21u,
+                    debug_flash_loader_snapshot_.dmcontrol_after_resume);
+          StoreBe32(debug_payload.data() + 25u, debug_flash_loader_snapshot_.a0_result);
+          StoreBe32(debug_payload.data() + 29u, debug_flash_loader_snapshot_.dcsr);
+          StoreBe32(debug_payload.data() + 33u, debug_flash_loader_snapshot_.dpc);
+          StoreBe32(debug_payload.data() + 37u, debug_flash_loader_snapshot_.mepc);
+          StoreBe32(debug_payload.data() + 41u, debug_flash_loader_snapshot_.mcause);
+          debug_payload[45] = debug_flash_loader_snapshot_.reg_readback_valid;
+          StoreBe32(debug_payload.data() + 46u, debug_flash_loader_snapshot_.run_entry);
+          StoreBe32(debug_payload.data() + 50u, debug_flash_loader_snapshot_.run_sp);
+          StoreBe32(debug_payload.data() + 54u, debug_flash_loader_snapshot_.reg_sp_readback);
           return BuildStandardResponse(
               0x11u, debug_payload.data(), static_cast<uint16_t>(debug_payload.size()), resp, cap,
               out_len);
@@ -2897,6 +3167,7 @@ class WchLinkRvClass : public DeviceClass
  private:
   static constexpr uint16_t CMD_PACKET_SIZE = 64u;
   static constexpr uint16_t DATA_PACKET_SIZE = 64u;
+  static constexpr uint16_t FLASH_STREAM_STAGE_BYTES = 1024u;
   static constexpr uint32_t AUTO_PUMP_PERIOD_MS = 1u;
   static constexpr uint8_t AUTO_PUMP_MAX_SPINS = 8u;
   static constexpr uint16_t BULK_MPS_FS = 64u;
@@ -2918,17 +3189,47 @@ class WchLinkRvClass : public DeviceClass
   static constexpr uint32_t RVSWD_CLOCK_HZ_HIGH = 500'000u;
   static constexpr uint8_t ATTACH_RETRY_COUNT = 10u;
   static constexpr uint32_t ATTACH_RETRY_DELAY_CYCLES = 60000u;
-  static constexpr uint16_t DMI_BUSY_RETRY_LIMIT = 16u;
+  static constexpr uint16_t DMI_BUSY_RETRY_LIMIT = 256u;
   static constexpr uint8_t ATTACH_DMCONTROL_ADDR = 0x10u;
   static constexpr uint8_t ATTACH_DMSTATUS_ADDR = 0x11u;
   static constexpr uint8_t ATTACH_ABSTRACTCS_ADDR = 0x16u;
   static constexpr uint16_t FLASH_OP_IMAGE_MAX_BYTES = 2048u;
   static constexpr uint16_t FLASH_PAGE_BUFFER_MAX_BYTES = 256u;
+  static constexpr uint32_t WCH_FLASH_FACTORY_MODE_ADDR = 0x1FFFF802u;
+  static constexpr uint32_t WCH_FLASH_FACTORY_MODE_COMMAND = 0x02000000u;
+  static constexpr uint32_t WCH_FLASH_OBR_RELOAD_ADDR = 0x1FFFF70Cu;
+  static constexpr uint32_t WCH_RCC_CTLR_ADDR = 0x40021000u;
+  static constexpr uint32_t WCH_RCC_CFGR0_ADDR = 0x40021004u;
+  static constexpr uint32_t WCH_RCC_INTR_ADDR = 0x40021008u;
+  static constexpr uint32_t WCH_RCC_AHBPRSTR_ADDR = 0x40021014u;
+  static constexpr uint32_t WCH_RCC_APB2PRSTR_ADDR = 0x40021018u;
+  static constexpr uint32_t WCH_RCC_APB1PCENR_ADDR = 0x4002101Cu;
+  static constexpr uint32_t WCH_RCC_APB1PRSTR_ADDR = 0x40021020u;
+  static constexpr uint32_t WCH_RCC_CFGR2_ADDR = 0x4002102Cu;
+  static constexpr uint32_t WCH_EXTEN_CTR_ADDR = 0x40023800u;
+  static constexpr uint32_t WCH_FLASH_KEYR_ADDR = 0x40022004u;
+  static constexpr uint32_t WCH_FLASH_STATR_ADDR = 0x4002200Cu;
+  static constexpr uint32_t WCH_FLASH_CTLR_ADDR = 0x40022010u;
+  static constexpr uint32_t WCH_FLASH_OBR_ADDR = 0x4002201Cu;
+  static constexpr uint32_t WCH_FLASH_WPR_ADDR = 0x40022020u;
+  static constexpr uint32_t WCH_FLASH_MODEKEYR_ADDR = 0x40022024u;
+  static constexpr uint32_t WCH_FLASH_KEY1 = 0x45670123u;
+  static constexpr uint32_t WCH_FLASH_KEY2 = 0xCDEF89ABu;
+  static constexpr uint32_t WCH_FLASH_STATR_BUSY_MASK = 0x00000003u;
+  static constexpr uint32_t WCH_FLASH_STATR_WRPRTERR = 0x00000010u;
+  static constexpr uint32_t WCH_FLASH_STATR_EOP = 0x00000020u;
+  static constexpr uint32_t WCH_FLASH_CTLR_MER = 0x00000004u;
+  static constexpr uint32_t WCH_FLASH_CTLR_STRT = 0x00000040u;
+  static constexpr uint32_t WCH_FLASH_READY_POLL_SHORT = 4096u;
+  static constexpr uint32_t WCH_FLASH_ERASE_POLL_LIMIT = 8192u;
+  static constexpr uint16_t WCH_POST_ERASE_DMSTATUS_POLLS = 202u;
   static constexpr uint16_t DEBUG_REG_RA = 0x1001u;
   static constexpr uint16_t DEBUG_REG_SP = 0x1002u;
   static constexpr uint16_t DEBUG_REG_A0 = 0x100Au;
   static constexpr uint16_t DEBUG_REG_A1 = 0x100Bu;
   static constexpr uint16_t DEBUG_REG_A2 = 0x100Cu;
+  static constexpr uint16_t DEBUG_REG_DCSR = 0x07B0u;
+  static constexpr uint16_t DEBUG_REG_MTVEC = 0x0305u;
   static constexpr uint8_t FLASH_OP_FLAG_UNLOCK = 0x01u;
   static constexpr uint8_t FLASH_OP_FLAG_MASS_ERASE = 0x02u;
   static constexpr uint8_t FLASH_OP_FLAG_PAGE_ERASE = 0x04u;
@@ -3017,6 +3318,8 @@ class WchLinkRvClass : public DeviceClass
   bool flash_stream_error_ = false;
   uint8_t flash_stream_ack_code_ = DATA_ACK_CODE_STREAM;
   bool flash_erase_requested_ = false;
+  bool flash_register_erase_done_ = false;
+  bool flash_stream_erase_pending_ = false;
   bool flash_stream_writer_active_ = false;
   bool flash_stream_writer_supported_ = false;
   bool target_debug_session_active_ = false;
@@ -3037,7 +3340,7 @@ class WchLinkRvClass : public DeviceClass
   std::array<uint8_t, FLASH_OP_IMAGE_MAX_BYTES> flash_op_image_ = {};
   std::array<uint8_t, FLASH_PAGE_BUFFER_MAX_BYTES> flash_page_buffer_ = {};
   std::array<uint8_t, 4u> flash_loader_verify_tail_ = {};
-  std::array<uint8_t, 4096u> flash_stream_stage_ = {};
+  std::array<uint8_t, FLASH_STREAM_STAGE_BYTES> flash_stream_stage_ = {};
   volatile uint16_t flash_stream_stage_head_ = 0u;
   volatile uint16_t flash_stream_stage_size_ = 0u;
   std::array<uint8_t, CMD_PACKET_SIZE> pending_cmd_resp_ = {};

@@ -40,6 +40,8 @@ class RiscvDmiTarget
     NONE = 0u,
     READ_DCSR,
     WRITE_DCSR,
+    WRITE_MSTATUS,
+    WRITE_MIE,
     WRITE_DPC,
     VERIFY_DPC,
     ACK_HAVE_RESET,
@@ -211,6 +213,11 @@ class RiscvDmiTarget
   bool WriteWordByAbstract(uint32_t addr, uint32_t data)
   {
     EndMemoryWriteSession();
+    if (WriteWordByWchFast(addr, data))
+    {
+      return true;
+    }
+
     if (!DmiWriteWord(DMI_PROGBUF0, 0x0072A023u))  // sw x7, 0(x5)
     {
       return false;
@@ -278,6 +285,75 @@ class RiscvDmiTarget
       return false;
     }
     return RunAbstractCommand(0x00271007u);  // x7 <- data0 with postexec
+  }
+
+  bool ReadWordByWchFast(uint32_t addr, uint32_t& data)
+  {
+    EndMemoryWriteSession();
+    if ((addr & 0x3u) != 0u)
+    {
+      return false;
+    }
+
+    return DmiWriteWord(DMI_DATA1, addr) && DmiWriteWord(DMI_COMMAND, COMMAND_WCH_READ_MEM32) &&
+           WaitAbstractCommandDone() && DmiReadWord(DMI_DATA0, data);
+  }
+
+  bool WriteWordByWchFast(uint32_t addr, uint32_t data)
+  {
+    EndMemoryWriteSession();
+    if ((addr & 0x3u) != 0u)
+    {
+      return false;
+    }
+
+    return DmiWriteWord(DMI_DATA1, addr) && DmiWriteWord(DMI_DATA0, data) &&
+           DmiWriteWord(DMI_COMMAND, COMMAND_WCH_WRITE_MEM32) && WaitAbstractCommandDone();
+  }
+
+  bool WriteWordByWchFastVerified(uint32_t addr, uint32_t data)
+  {
+    uint32_t readback = 0u;
+    return WriteWordByWchFast(addr, data) && ReadWordByWchFast(addr, readback) &&
+           readback == data;
+  }
+
+  bool RunWchCustomCommand(uint32_t data1, uint32_t command)
+  {
+    EndMemoryWriteSession();
+    return DmiWriteWord(DMI_DATA1, data1) && DmiWriteWord(DMI_COMMAND, command) &&
+           WaitAbstractCommandDone();
+  }
+
+  void RecoverDebugModuleAfterFault()
+  {
+    EndMemoryWriteSession();
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x00000000u);
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x00000001u);
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x00000003u);
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x00000001u);
+    (void)ClearAbstractCommandError();
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x80000001u);
+    (void)DmiWriteWord(DMI_DMCONTROL, 0x00000001u);
+    (void)ClearAbstractCommandError();
+  }
+
+  bool RunWchPostEraseSettle(uint16_t dmstatus_polls)
+  {
+    EndMemoryWriteSession();
+    if (!DmiWriteWord(DMI_DMCONTROL, 0x40000001u) ||
+        !DmiWriteWord(DMI_DMCONTROL, 0x80000001u) ||
+        !DmiWriteWord(DMI_DMCONTROL, 0x80000001u))
+    {
+      return false;
+    }
+
+    for (uint16_t poll = 0u; poll < dmstatus_polls; ++poll)
+    {
+      uint32_t dmstatus = 0u;
+      (void)DmiReadWord(DMI_DMSTATUS, dmstatus);
+    }
+    return true;
   }
 
   bool ReadWordWithTemporaryHalt(uint32_t addr, uint32_t& data)
@@ -422,44 +498,35 @@ class RiscvDmiTarget
       const uint32_t CUR_ADDR = addr + off;
       if ((CUR_ADDR & 0x3u) == 0u && (len - off) >= 4u)
       {
-        if (!streaming)
+        while (off < len)
         {
-          streaming = BeginMemoryWriteSession(CUR_ADDR);
-        }
-
-        if (streaming)
-        {
-          while (off < len)
+          const uint32_t STREAM_ADDR = addr + off;
+          if ((STREAM_ADDR & 0x3u) != 0u || (len - off) < 4u)
           {
-            const uint32_t STREAM_ADDR = addr + off;
-            if ((STREAM_ADDR & 0x3u) != 0u || (len - off) < 4u)
-            {
-              break;
-            }
-
-            const uint32_t WORD = static_cast<uint32_t>(data[off]) |
-                                  (static_cast<uint32_t>(data[off + 1u]) << 8u) |
-                                  (static_cast<uint32_t>(data[off + 2u]) << 16u) |
-                                  (static_cast<uint32_t>(data[off + 3u]) << 24u);
-            if (!WriteMemoryWordStreaming(WORD))
-            {
-              EndMemoryWriteSession();
-              return false;
-            }
-            off += 4u;
+            break;
           }
-          continue;
-        }
 
-        const uint32_t WORD = static_cast<uint32_t>(data[off]) |
-                              (static_cast<uint32_t>(data[off + 1u]) << 8u) |
-                              (static_cast<uint32_t>(data[off + 2u]) << 16u) |
-                              (static_cast<uint32_t>(data[off + 3u]) << 24u);
-        if (!WriteWordByAbstract(CUR_ADDR, WORD))
-        {
-          return false;
+          const uint32_t WORD = static_cast<uint32_t>(data[off]) |
+                                (static_cast<uint32_t>(data[off + 1u]) << 8u) |
+                                (static_cast<uint32_t>(data[off + 2u]) << 16u) |
+                                (static_cast<uint32_t>(data[off + 3u]) << 24u);
+          if (!streaming && WriteWordByWchFastVerified(STREAM_ADDR, WORD))
+          {
+            off += 4u;
+            continue;
+          }
+
+          if (!streaming)
+          {
+            streaming = BeginMemoryWriteSession(STREAM_ADDR);
+          }
+          if (!streaming || !WriteMemoryWordStreaming(WORD))
+          {
+            EndMemoryWriteSession();
+            return false;
+          }
+          off += 4u;
         }
-        off += 4u;
         continue;
       }
 
@@ -596,12 +663,42 @@ class RiscvDmiTarget
       }
     }
 
+    uint32_t saved_mstatus = 0u;
+    uint32_t saved_mie = 0u;
+    bool restore_mstatus = false;
+    bool restore_mie = false;
+
     auto restore_dcsr = [&]() {
+      if (restore_mie)
+      {
+        (void)WriteCpuRegister(REG_MIE, saved_mie);
+      }
+      if (restore_mstatus)
+      {
+        (void)WriteCpuRegister(REG_MSTATUS, saved_mstatus);
+      }
       if (RESTORE_DCSR)
       {
         (void)WriteCpuRegister(REG_DCSR, saved_dcsr);
       }
     };
+
+    // WCH-Link clears mstatus before running the RAM flash algorithm; keeping
+    // WCH-specific interrupt bits set lets pending PFIC interrupts preempt it.
+    restore_mstatus = ReadCpuRegister(REG_MSTATUS, saved_mstatus);
+    if (!WriteCpuRegister(REG_MSTATUS, 0u))
+    {
+      record_failure(RunProgramFailureStage::WRITE_MSTATUS);
+      restore_dcsr();
+      return false;
+    }
+    restore_mie = ReadCpuRegister(REG_MIE, saved_mie);
+    if (!WriteCpuRegister(REG_MIE, 0u))
+    {
+      record_failure(RunProgramFailureStage::WRITE_MIE);
+      restore_dcsr();
+      return false;
+    }
 
     if (!WriteCpuRegister(REG_DPC, pc))
     {
@@ -634,34 +731,6 @@ class RiscvDmiTarget
       debug_snapshot->dmstatus_before_resume = dmstatus_before_resume;
     }
 
-    if (!DmiWriteWord(DMI_DMCONTROL, 0x10000001u))
-    {
-      record_failure(RunProgramFailureStage::ACK_HAVE_RESET);
-      capture_halt_snapshot();
-      restore_dcsr();
-      return false;
-    }
-    if (!DmiWriteWord(DMI_DMCONTROL, 0x80000001u))
-    {
-      record_failure(RunProgramFailureStage::PRIME_HALTREQ_FIRST);
-      capture_halt_snapshot();
-      restore_dcsr();
-      return false;
-    }
-    if (!DmiWriteWord(DMI_DMCONTROL, 0x80000001u))
-    {
-      record_failure(RunProgramFailureStage::PRIME_HALTREQ_SECOND);
-      capture_halt_snapshot();
-      restore_dcsr();
-      return false;
-    }
-    if (!DmiWriteWord(DMI_DMCONTROL, 0x00000001u))
-    {
-      record_failure(RunProgramFailureStage::CLEAR_HALTREQ);
-      capture_halt_snapshot();
-      restore_dcsr();
-      return false;
-    }
     if (!DmiWriteWord(DMI_DMCONTROL, 0x40000001u))
     {
       record_failure(RunProgramFailureStage::RESUME_REQ);
@@ -1034,6 +1103,7 @@ class RiscvDmiTarget
 
  private:
   static constexpr uint8_t DMI_DATA0 = 0x04u;
+  static constexpr uint8_t DMI_DATA1 = 0x05u;
   static constexpr uint8_t DMI_DMCONTROL = 0x10u;
   static constexpr uint8_t DMI_DMSTATUS = 0x11u;
   static constexpr uint8_t DMI_ABSTRACTCS = 0x16u;
@@ -1042,10 +1112,14 @@ class RiscvDmiTarget
   static constexpr uint8_t DMI_PROGBUF0 = 0x20u;
   static constexpr uint8_t DMI_PROGBUF1 = 0x21u;
   static constexpr uint8_t DMI_PROGBUF2 = 0x22u;
+  static constexpr uint32_t COMMAND_WCH_READ_MEM32 = 0x02200000u;
+  static constexpr uint32_t COMMAND_WCH_WRITE_MEM32 = 0x02210000u;
   static constexpr uint32_t COMMAND_WRITE_X5 = 0x00231005u;
   static constexpr uint32_t COMMAND_WRITE_X6_POSTEXEC = 0x00271006u;
   static constexpr uint32_t ABSTRACTAUTO_EXEC_DATA0 = 0x00000001u;
   static constexpr uint16_t REG_A0 = 0x100Au;
+  static constexpr uint16_t REG_MSTATUS = 0x0300u;
+  static constexpr uint16_t REG_MIE = 0x0304u;
   static constexpr uint16_t REG_DCSR = 0x07B0u;
   static constexpr uint16_t REG_DPC = 0x07B1u;
   static constexpr uint16_t REG_MEPC = 0x0341u;
