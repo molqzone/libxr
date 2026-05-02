@@ -3,10 +3,427 @@
 #include <array>
 #include <cstdint>
 
+#include "gpio.hpp"
 #include "rvswd.hpp"
 #include "swd_protocol.hpp"
 
 namespace LibXR::Debug {
+enum class RvSwdGpioDriveMode : uint8_t
+{
+  PUSH_PULL = 0,
+  OPEN_DRAIN = 1,
+};
+
+template <typename ClkGpioType, typename DioGpioType,
+          RvSwdGpioDriveMode IO_DRIVE_MODE = RvSwdGpioDriveMode::PUSH_PULL>
+class RvSwdGpioBitPort final
+{
+  static constexpr uint32_t MIN_HZ = 10'000u;
+  static constexpr uint32_t MAX_HZ = 100'000'000u;
+  static constexpr uint32_t DEFAULT_CLOCK_HZ = 1'000'000u;
+
+  static constexpr uint32_t NS_PER_SEC = 1'000'000'000u;
+  static constexpr uint32_t LOOPS_SCALE = 1000u;
+  static constexpr uint32_t CEIL_BIAS = LOOPS_SCALE - 1u;
+
+  static constexpr uint32_t HalfPeriodNsFromHz(uint32_t hz)
+  {
+    return (NS_PER_SEC + (2u * hz) - 1u) / (2u * hz);
+  }
+
+  static constexpr uint32_t HALF_PERIOD_NS_MAX = HalfPeriodNsFromHz(MIN_HZ);
+  static constexpr uint32_t MAX_LOOPS_PER_US =
+      (UINT32_MAX - CEIL_BIAS) / HALF_PERIOD_NS_MAX;
+
+ public:
+  explicit RvSwdGpioBitPort(ClkGpioType& clk, DioGpioType& dio, uint32_t loops_per_us,
+                            uint32_t default_hz = DEFAULT_CLOCK_HZ)
+      : clk_(clk), dio_(dio), loops_per_us_(loops_per_us)
+  {
+    if (loops_per_us_ > MAX_LOOPS_PER_US)
+    {
+      loops_per_us_ = MAX_LOOPS_PER_US;
+    }
+
+    clk_.SetConfig({ClkGpioType::Direction::OUTPUT_PUSH_PULL, ClkGpioType::Pull::NONE});
+    clk_.Write(true);
+
+    (void)SetDioDriveMode();
+    dio_.Write(true);
+
+    (void)SetClockHz(default_hz);
+  }
+
+  RvSwdGpioBitPort(const RvSwdGpioBitPort&) = delete;
+  RvSwdGpioBitPort& operator=(const RvSwdGpioBitPort&) = delete;
+
+  ErrorCode SetClockHz(uint32_t hz)
+  {
+    if (hz == 0u)
+    {
+      clock_hz_ = 0u;
+      half_period_ns_ = 0u;
+      half_period_loops_ = 0u;
+      return ErrorCode::OK;
+    }
+
+    if (hz < MIN_HZ)
+    {
+      hz = MIN_HZ;
+    }
+    if (hz > MAX_HZ)
+    {
+      hz = MAX_HZ;
+    }
+
+    clock_hz_ = hz;
+    half_period_ns_ = HalfPeriodNsFromHz(hz);
+
+    if (loops_per_us_ == 0u)
+    {
+      half_period_loops_ = 0u;
+      return ErrorCode::OK;
+    }
+
+    const uint64_t loops_scaled =
+        static_cast<uint64_t>(loops_per_us_) * static_cast<uint64_t>(half_period_ns_);
+    half_period_loops_ =
+        (loops_scaled < LOOPS_SCALE)
+            ? 0u
+            : static_cast<uint32_t>((loops_scaled + CEIL_BIAS) / LOOPS_SCALE);
+
+    return ErrorCode::OK;
+  }
+
+  void Close()
+  {
+    clk_.Write(true);
+    (void)SetDioSampleMode();
+  }
+
+  ErrorCode LineReset()
+  {
+    const ErrorCode ec = SetDioDriveMode();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    dio_.Write(true);
+    for (uint32_t i = 0u; i < 64u; ++i)
+    {
+      GenOneClk();
+    }
+    return ErrorCode::OK;
+  }
+
+  void IdleClocks(uint32_t cycles)
+  {
+    (void)SetDioDriveMode();
+    dio_.Write(true);
+    for (uint32_t i = 0u; i < cycles; ++i)
+    {
+      GenOneClk();
+    }
+    dio_.Write(false);
+  }
+
+  ErrorCode SeqWriteBits(uint32_t cycles, const uint8_t* data_lsb_first)
+  {
+    return RvSwdSeqWriteBits(cycles, data_lsb_first);
+  }
+
+  ErrorCode SeqReadBits(uint32_t cycles, uint8_t* out_lsb_first)
+  {
+    if (cycles == 0u)
+    {
+      clk_.Write(false);
+      return ErrorCode::OK;
+    }
+    if (out_lsb_first == nullptr)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+
+    ClearBits(out_lsb_first, cycles);
+
+    const ErrorCode ec = SetDioSampleMode();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    clk_.Write(false);
+    for (uint32_t i = 0u; i < cycles; ++i)
+    {
+      bool bit = false;
+      if (half_period_loops_ == 0u)
+      {
+        clk_.Write(false);
+        bit = dio_.Read();
+        clk_.Write(true);
+      }
+      else
+      {
+        clk_.Write(false);
+        DelayHalf();
+        bit = dio_.Read();
+        clk_.Write(true);
+        DelayHalf();
+      }
+
+      if (bit)
+      {
+        SetBit(out_lsb_first, i);
+      }
+
+      clk_.Write(false);
+    }
+
+    return ErrorCode::OK;
+  }
+
+  ErrorCode RvSwdReadBits(uint32_t cycles, uint8_t* out_lsb_first)
+  {
+    if (cycles == 0u)
+    {
+      clk_.Write(false);
+      return ErrorCode::OK;
+    }
+    if (out_lsb_first == nullptr)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+
+    ClearBits(out_lsb_first, cycles);
+
+    const ErrorCode ec = SetDioSampleMode();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    clk_.Write(false);
+    for (uint32_t i = 0u; i < cycles; ++i)
+    {
+      bool bit = false;
+      if (half_period_loops_ == 0u)
+      {
+        clk_.Write(true);
+        bit = dio_.Read();
+        clk_.Write(false);
+      }
+      else
+      {
+        clk_.Write(true);
+        DelayHalf();
+        bit = dio_.Read();
+        clk_.Write(false);
+        DelayHalf();
+      }
+
+      if (bit)
+      {
+        SetBit(out_lsb_first, i);
+      }
+    }
+
+    return ErrorCode::OK;
+  }
+
+  ErrorCode RvSwdSeqWriteBits(uint32_t cycles, const uint8_t* data_lsb_first)
+  {
+    if (cycles == 0u)
+    {
+      clk_.Write(false);
+      return ErrorCode::OK;
+    }
+    if (data_lsb_first == nullptr)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+
+    const ErrorCode ec = SetDioDriveMode();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    clk_.Write(false);
+    for (uint32_t i = 0u; i < cycles; ++i)
+    {
+      const bool bit = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
+      dio_.Write(bit);
+      GenOneClk();
+      clk_.Write(false);
+    }
+
+    return ErrorCode::OK;
+  }
+
+  ErrorCode RvSwdWakePulse()
+  {
+    const ErrorCode ec = SetDioDriveMode();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    clk_.Write(true);
+    dio_.Write(true);
+    DelayHalf();
+    for (uint32_t i = 0u; i < 100u; ++i)
+    {
+      clk_.Write(false);
+      DelayHalf();
+      clk_.Write(true);
+      DelayHalf();
+    }
+
+    dio_.Write(false);
+    DelayHalf();
+    dio_.Write(true);
+    DelayHalf();
+    return ErrorCode::OK;
+  }
+
+  ErrorCode RvSwdPrepareReadTurnaround()
+  {
+    const ErrorCode ec = SetDioSampleMode();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    clk_.Write(false);
+    return ErrorCode::OK;
+  }
+
+  ErrorCode RvSwdStart()
+  {
+    const ErrorCode ec = SetDioDriveMode();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    dio_.Write(true);
+    clk_.Write(true);
+    DelayHalf();
+    dio_.Write(false);
+    DelayHalf();
+    clk_.Write(false);
+    return ErrorCode::OK;
+  }
+
+  ErrorCode RvSwdStop()
+  {
+    const ErrorCode ec = SetDioDriveMode();
+    if (ec != ErrorCode::OK)
+    {
+      return ec;
+    }
+
+    dio_.Write(false);
+    clk_.Write(false);
+    DelayHalf();
+    clk_.Write(true);
+    DelayHalf();
+    dio_.Write(true);
+    DelayHalf();
+    return ErrorCode::OK;
+  }
+
+  ErrorCode BeginRvSwdFrame() { return RvSwdStart(); }
+  ErrorCode EndRvSwdFrame() { return RvSwdStop(); }
+  ErrorCode WakeRvSwd() { return RvSwdWakePulse(); }
+
+ private:
+  enum class DioMode : uint8_t
+  {
+    UNKNOWN = 0u,
+    DRIVE,
+    SAMPLE_IN,
+  };
+
+  ErrorCode SetDioDriveMode()
+  {
+    if (dio_mode_ != DioMode::DRIVE)
+    {
+      const ErrorCode ec =
+          dio_.SetConfig({(IO_DRIVE_MODE == RvSwdGpioDriveMode::OPEN_DRAIN)
+                              ? DioGpioType::Direction::OUTPUT_OPEN_DRAIN
+                              : DioGpioType::Direction::OUTPUT_PUSH_PULL,
+                          DioGpioType::Pull::NONE});
+      if (ec != ErrorCode::OK)
+      {
+        return ec;
+      }
+    }
+
+    dio_mode_ = DioMode::DRIVE;
+    return ErrorCode::OK;
+  }
+
+  ErrorCode SetDioSampleMode()
+  {
+    if (dio_mode_ != DioMode::SAMPLE_IN)
+    {
+      const ErrorCode ec =
+          dio_.SetConfig({DioGpioType::Direction::INPUT, DioGpioType::Pull::UP});
+      if (ec != ErrorCode::OK)
+      {
+        return ec;
+      }
+    }
+
+    dio_mode_ = DioMode::SAMPLE_IN;
+    return ErrorCode::OK;
+  }
+
+  void DelayHalf() { BusyLoop(half_period_loops_); }
+
+  void GenOneClk()
+  {
+    clk_.Write(false);
+    DelayHalf();
+    clk_.Write(true);
+    DelayHalf();
+  }
+
+  static void BusyLoop(uint32_t loops)
+  {
+    volatile uint32_t sink = loops;
+    while (sink-- > 0u)
+    {
+      __asm volatile("nop");
+    }
+  }
+
+  static void ClearBits(uint8_t* data, uint32_t bits)
+  {
+    const uint32_t bytes = (bits + 7u) / 8u;
+    for (uint32_t i = 0u; i < bytes; ++i)
+    {
+      data[i] = 0u;
+    }
+  }
+
+  static void SetBit(uint8_t* data, uint32_t bit)
+  {
+    data[bit / 8u] = static_cast<uint8_t>(data[bit / 8u] | (1u << (bit & 7u)));
+  }
+
+ private:
+  ClkGpioType& clk_;
+  DioGpioType& dio_;
+  uint32_t loops_per_us_ = 0u;
+  uint32_t clock_hz_ = 0u;
+  uint32_t half_period_ns_ = 0u;
+  uint32_t half_period_loops_ = 0u;
+  DioMode dio_mode_ = DioMode::UNKNOWN;
+};
+
 /**
  * @brief RVSWD protocol over a GPIO bit-serial backend.
  *
