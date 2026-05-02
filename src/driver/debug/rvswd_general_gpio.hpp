@@ -8,18 +8,17 @@
 #include "rvswd_protocol.hpp"
 
 namespace LibXR::Debug {
-enum class RvSwdGpioDriveMode : uint8_t
+enum class RvSwdioDriveMode : uint8_t
 {
   PUSH_PULL = 0,
   OPEN_DRAIN = 1,
 };
 
-
 /**
  * @brief RVSWD protocol over LibXR GPIO bit-banging.
  */
-template <typename ClkGpioType, typename DioGpioType,
-          RvSwdGpioDriveMode IO_DRIVE_MODE = RvSwdGpioDriveMode::PUSH_PULL>
+template <typename RvSwclkGpioType, typename RvSwdioGpioType,
+          RvSwdioDriveMode IO_DRIVE_MODE = RvSwdioDriveMode::PUSH_PULL>
 class RvSwdGeneralGPIO final : public RvSwd
 {
   static constexpr uint32_t MIN_HZ = 10'000u;
@@ -70,20 +69,22 @@ class RvSwdGeneralGPIO final : public RvSwd
   // generous to avoid premature FAIL on transient WAIT windows.
   static constexpr uint8_t kBridgeWaitRetryLimit = 0xFFu;
 
-  explicit RvSwdGeneralGPIO(ClkGpioType& clk, DioGpioType& dio, uint32_t loops_per_us,
-                          uint32_t default_hz = DEFAULT_CLOCK_HZ)
-      : clk_(clk), dio_(dio), loops_per_us_(loops_per_us)
+  explicit RvSwdGeneralGPIO(RvSwclkGpioType& rvswclk, RvSwdioGpioType& rvswdio,
+                            uint32_t loops_per_us,
+                            uint32_t default_hz = DEFAULT_CLOCK_HZ)
+      : rvswclk_(rvswclk), rvswdio_(rvswdio), loops_per_us_(loops_per_us)
   {
     if (loops_per_us_ > MAX_LOOPS_PER_US)
     {
       loops_per_us_ = MAX_LOOPS_PER_US;
     }
 
-    clk_.SetConfig({ClkGpioType::Direction::OUTPUT_PUSH_PULL, ClkGpioType::Pull::NONE});
-    clk_.Write(true);
+    rvswclk_.SetConfig(
+        {RvSwclkGpioType::Direction::OUTPUT_PUSH_PULL, RvSwclkGpioType::Pull::NONE});
+    rvswclk_.Write(true);
 
-    (void)SetDioDriveMode();
-    dio_.Write(true);
+    (void)SetRvSwdioDriveMode();
+    rvswdio_.Write(true);
 
     (void)SetClockHz(default_hz);
   }
@@ -256,8 +257,8 @@ class RvSwdGeneralGPIO final : public RvSwd
     online_ready_ = false;
     bridge_stage_43_ = 0u;
     bridge_scratch_payload_ = 0u;
-    clk_.Write(true);
-    (void)SetDioSampleMode();
+    rvswclk_.Write(true);
+    (void)SetRvSwdioSampleMode();
   }
 
   ErrorCode LineReset() override
@@ -265,13 +266,13 @@ class RvSwdGeneralGPIO final : public RvSwd
     online_ready_ = false;
     bridge_stage_43_ = 0u;
     bridge_scratch_payload_ = 0u;
-    const ErrorCode ec = SetDioDriveMode();
+    const ErrorCode ec = SetRvSwdioDriveMode();
     if (ec != ErrorCode::OK)
     {
       return ec;
     }
 
-    dio_.Write(true);
+    rvswdio_.Write(true);
     for (uint32_t i = 0u; i < 64u; ++i)
     {
       GenOneClk();
@@ -381,13 +382,13 @@ class RvSwdGeneralGPIO final : public RvSwd
 
   void IdleClocks(uint32_t cycles) override
   {
-    (void)SetDioDriveMode();
-    dio_.Write(true);
+    (void)SetRvSwdioDriveMode();
+    rvswdio_.Write(true);
     for (uint32_t i = 0u; i < cycles; ++i)
     {
       GenOneClk();
     }
-    dio_.Write(false);
+    rvswdio_.Write(false);
   }
 
  private:
@@ -1184,7 +1185,7 @@ class RvSwdGeneralGPIO final : public RvSwd
   }
 
  private:
-  enum class DioMode : uint8_t
+  enum class RvSwdioMode : uint8_t
   {
     UNKNOWN = 0u,
     DRIVE,
@@ -1200,7 +1201,7 @@ class RvSwdGeneralGPIO final : public RvSwd
   {
     if (cycles == 0u)
     {
-      clk_.Write(false);
+      rvswclk_.Write(false);
       return ErrorCode::OK;
     }
     if (out_lsb_first == nullptr)
@@ -1210,28 +1211,28 @@ class RvSwdGeneralGPIO final : public RvSwd
 
     ClearBits(out_lsb_first, cycles);
 
-    const ErrorCode ec = SetDioSampleMode();
+    const ErrorCode ec = SetRvSwdioSampleMode();
     if (ec != ErrorCode::OK)
     {
       return ec;
     }
 
-    clk_.Write(false);
+    rvswclk_.Write(false);
     for (uint32_t i = 0u; i < cycles; ++i)
     {
       bool bit = false;
       if (half_period_loops_ == 0u)
       {
-        clk_.Write(false);
-        bit = dio_.Read();
-        clk_.Write(true);
+        rvswclk_.Write(false);
+        bit = rvswdio_.Read();
+        rvswclk_.Write(true);
       }
       else
       {
-        clk_.Write(false);
+        rvswclk_.Write(false);
         DelayHalf();
-        bit = dio_.Read();
-        clk_.Write(true);
+        bit = rvswdio_.Read();
+        rvswclk_.Write(true);
         DelayHalf();
       }
 
@@ -1240,7 +1241,7 @@ class RvSwdGeneralGPIO final : public RvSwd
         SetBit(out_lsb_first, i);
       }
 
-      clk_.Write(false);
+      rvswclk_.Write(false);
     }
 
     return ErrorCode::OK;
@@ -1250,7 +1251,7 @@ class RvSwdGeneralGPIO final : public RvSwd
   {
     if (cycles == 0u)
     {
-      clk_.Write(false);
+      rvswclk_.Write(false);
       return ErrorCode::OK;
     }
     if (out_lsb_first == nullptr)
@@ -1260,28 +1261,28 @@ class RvSwdGeneralGPIO final : public RvSwd
 
     ClearBits(out_lsb_first, cycles);
 
-    const ErrorCode ec = SetDioSampleMode();
+    const ErrorCode ec = SetRvSwdioSampleMode();
     if (ec != ErrorCode::OK)
     {
       return ec;
     }
 
-    clk_.Write(false);
+    rvswclk_.Write(false);
     for (uint32_t i = 0u; i < cycles; ++i)
     {
       bool bit = false;
       if (half_period_loops_ == 0u)
       {
-        clk_.Write(true);
-        bit = dio_.Read();
-        clk_.Write(false);
+        rvswclk_.Write(true);
+        bit = rvswdio_.Read();
+        rvswclk_.Write(false);
       }
       else
       {
-        clk_.Write(true);
+        rvswclk_.Write(true);
         DelayHalf();
-        bit = dio_.Read();
-        clk_.Write(false);
+        bit = rvswdio_.Read();
+        rvswclk_.Write(false);
         DelayHalf();
       }
 
@@ -1298,7 +1299,7 @@ class RvSwdGeneralGPIO final : public RvSwd
   {
     if (cycles == 0u)
     {
-      clk_.Write(false);
+      rvswclk_.Write(false);
       return ErrorCode::OK;
     }
     if (data_lsb_first == nullptr)
@@ -1306,19 +1307,19 @@ class RvSwdGeneralGPIO final : public RvSwd
       return ErrorCode::ARG_ERR;
     }
 
-    const ErrorCode ec = SetDioDriveMode();
+    const ErrorCode ec = SetRvSwdioDriveMode();
     if (ec != ErrorCode::OK)
     {
       return ec;
     }
 
-    clk_.Write(false);
+    rvswclk_.Write(false);
     for (uint32_t i = 0u; i < cycles; ++i)
     {
       const bool bit = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
-      dio_.Write(bit);
+      rvswdio_.Write(bit);
       GenOneClk();
-      clk_.Write(false);
+      rvswclk_.Write(false);
     }
 
     return ErrorCode::OK;
@@ -1326,73 +1327,73 @@ class RvSwdGeneralGPIO final : public RvSwd
 
   ErrorCode RvSwdWakePulse()
   {
-    const ErrorCode ec = SetDioDriveMode();
+    const ErrorCode ec = SetRvSwdioDriveMode();
     if (ec != ErrorCode::OK)
     {
       return ec;
     }
 
-    clk_.Write(true);
-    dio_.Write(true);
+    rvswclk_.Write(true);
+    rvswdio_.Write(true);
     DelayHalf();
     for (uint32_t i = 0u; i < 100u; ++i)
     {
-      clk_.Write(false);
+      rvswclk_.Write(false);
       DelayHalf();
-      clk_.Write(true);
+      rvswclk_.Write(true);
       DelayHalf();
     }
 
-    dio_.Write(false);
+    rvswdio_.Write(false);
     DelayHalf();
-    dio_.Write(true);
+    rvswdio_.Write(true);
     DelayHalf();
     return ErrorCode::OK;
   }
 
   ErrorCode RvSwdPrepareReadTurnaround()
   {
-    const ErrorCode ec = SetDioSampleMode();
+    const ErrorCode ec = SetRvSwdioSampleMode();
     if (ec != ErrorCode::OK)
     {
       return ec;
     }
 
-    clk_.Write(false);
+    rvswclk_.Write(false);
     return ErrorCode::OK;
   }
 
   ErrorCode RvSwdStart()
   {
-    const ErrorCode ec = SetDioDriveMode();
+    const ErrorCode ec = SetRvSwdioDriveMode();
     if (ec != ErrorCode::OK)
     {
       return ec;
     }
 
-    dio_.Write(true);
-    clk_.Write(true);
+    rvswdio_.Write(true);
+    rvswclk_.Write(true);
     DelayHalf();
-    dio_.Write(false);
+    rvswdio_.Write(false);
     DelayHalf();
-    clk_.Write(false);
+    rvswclk_.Write(false);
     return ErrorCode::OK;
   }
 
   ErrorCode RvSwdStop()
   {
-    const ErrorCode ec = SetDioDriveMode();
+    const ErrorCode ec = SetRvSwdioDriveMode();
     if (ec != ErrorCode::OK)
     {
       return ec;
     }
 
-    dio_.Write(false);
-    clk_.Write(false);
+    rvswdio_.Write(false);
+    rvswclk_.Write(false);
     DelayHalf();
-    clk_.Write(true);
+    rvswclk_.Write(true);
     DelayHalf();
-    dio_.Write(true);
+    rvswdio_.Write(true);
     DelayHalf();
     return ErrorCode::OK;
   }
@@ -1400,38 +1401,38 @@ class RvSwdGeneralGPIO final : public RvSwd
   ErrorCode BeginRvSwdFrame() { return RvSwdStart(); }
   ErrorCode EndRvSwdFrame() { return RvSwdStop(); }
 
-  ErrorCode SetDioDriveMode()
+  ErrorCode SetRvSwdioDriveMode()
   {
-    if (dio_mode_ != DioMode::DRIVE)
+    if (rvswdio_mode_ != RvSwdioMode::DRIVE)
     {
       const ErrorCode ec =
-          dio_.SetConfig({(IO_DRIVE_MODE == RvSwdGpioDriveMode::OPEN_DRAIN)
-                              ? DioGpioType::Direction::OUTPUT_OPEN_DRAIN
-                              : DioGpioType::Direction::OUTPUT_PUSH_PULL,
-                          DioGpioType::Pull::NONE});
+          rvswdio_.SetConfig({(IO_DRIVE_MODE == RvSwdioDriveMode::OPEN_DRAIN)
+                                   ? RvSwdioGpioType::Direction::OUTPUT_OPEN_DRAIN
+                                   : RvSwdioGpioType::Direction::OUTPUT_PUSH_PULL,
+                               RvSwdioGpioType::Pull::NONE});
       if (ec != ErrorCode::OK)
       {
         return ec;
       }
     }
 
-    dio_mode_ = DioMode::DRIVE;
+    rvswdio_mode_ = RvSwdioMode::DRIVE;
     return ErrorCode::OK;
   }
 
-  ErrorCode SetDioSampleMode()
+  ErrorCode SetRvSwdioSampleMode()
   {
-    if (dio_mode_ != DioMode::SAMPLE_IN)
+    if (rvswdio_mode_ != RvSwdioMode::SAMPLE_IN)
     {
       const ErrorCode ec =
-          dio_.SetConfig({DioGpioType::Direction::INPUT, DioGpioType::Pull::UP});
+          rvswdio_.SetConfig({RvSwdioGpioType::Direction::INPUT, RvSwdioGpioType::Pull::UP});
       if (ec != ErrorCode::OK)
       {
         return ec;
       }
     }
 
-    dio_mode_ = DioMode::SAMPLE_IN;
+    rvswdio_mode_ = RvSwdioMode::SAMPLE_IN;
     return ErrorCode::OK;
   }
 
@@ -1439,9 +1440,9 @@ class RvSwdGeneralGPIO final : public RvSwd
 
   void GenOneClk()
   {
-    clk_.Write(false);
+    rvswclk_.Write(false);
     DelayHalf();
-    clk_.Write(true);
+    rvswclk_.Write(true);
     DelayHalf();
   }
 
@@ -1468,13 +1469,13 @@ class RvSwdGeneralGPIO final : public RvSwd
     data[bit / 8u] = static_cast<uint8_t>(data[bit / 8u] | (1u << (bit & 7u)));
   }
 
-  ClkGpioType& clk_;
-  DioGpioType& dio_;
+  RvSwclkGpioType& rvswclk_;
+  RvSwdioGpioType& rvswdio_;
   uint32_t loops_per_us_ = 0u;
   uint32_t clock_hz_ = 0u;
   uint32_t half_period_ns_ = 0u;
   uint32_t half_period_loops_ = 0u;
-  DioMode dio_mode_ = DioMode::UNKNOWN;
+  RvSwdioMode rvswdio_mode_ = RvSwdioMode::UNKNOWN;
   bool online_ready_ = false;
   uint64_t last_host_frame_ = 0u;
   uint64_t last_target_frame_ = 0u;
