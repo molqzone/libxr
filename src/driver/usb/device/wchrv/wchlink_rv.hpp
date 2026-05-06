@@ -1695,10 +1695,6 @@ class WchLinkRvClass : public DeviceClass
     {
       flash_program_flags_ = static_cast<uint8_t>(FLASH_OP_FLAG_PROGRAM | FLASH_OP_FLAG_VERIFY);
     }
-    if (target_state_.reported_family == 0x05u)
-    {
-      flash_program_flags_ = 0u;
-    }
     flash_loader_fill_ = 0u;
     flash_loader_verify_sum_ = 0u;
     flash_loader_verify_tail_fill_ = 0u;
