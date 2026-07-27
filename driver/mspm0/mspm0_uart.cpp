@@ -162,12 +162,22 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
 
   DL_UART_clearInterruptStatus(res_.instance, 0xFFFFFFFF);
   DL_UART_enableInterrupt(res_.instance, MSPM0_UART_BASE_INTERRUPT_MASK);
-  DL_UART_disableInterrupt(res_.instance,
-                           DL_UART_INTERRUPT_TX | GetTimeoutInterruptMask());
+  uint32_t disable_mask = DL_UART_INTERRUPT_TX;
+  if (!UseContinuousRxTimeout())
+  {
+    disable_mask |= GetTimeoutInterruptMask();
+  }
+  DL_UART_disableInterrupt(res_.instance, disable_mask);
+  if (UseContinuousRxTimeout())
+  {
+    DL_UART_enableInterrupt(res_.instance, GetTimeoutInterruptMask());
+  }
 
   tx_active_valid_ = false;
   tx_active_remaining_ = 0;
   tx_active_total_ = 0;
+  rx_drop_count_ = 0;
+  rx_timeout_count_ = 0;
 
   DL_UART_enable(res_.instance);
 
@@ -186,7 +196,7 @@ ErrorCode MSPM0UART::ReadFun(ReadPort& port, bool)
 {
   auto* uart = LibXR::ContainerOf(&port, &MSPM0UART::_read_port);
   const uint32_t TIMEOUT_MASK = uart->GetTimeoutInterruptMask();
-  if (TIMEOUT_MASK != 0U)
+  if (TIMEOUT_MASK != 0U && !uart->UseContinuousRxTimeout())
   {
     // 仅在有挂起读请求时启用超时中断，避免空闲无效触发 / Enable timeout IRQ
     // only when a read request is pending to avoid idle false triggers.
@@ -242,12 +252,18 @@ uint32_t MSPM0UART::GetTimeoutInterruptMask() const
     // Use LINC0 compare match as frame-gap timeout event.
     case RxTimeoutMode::LIN_COMPARE:
       return DL_UART_INTERRUPT_LINC0_MATCH;
-    // [BYTE路径 / BYTE path] 不使用硬件超时中断 /
-    // No hardware timeout interrupt in byte-interrupt mode.
+    // [BYTE路径 / BYTE path] 使用 UART RX timeout 作为兜底帧结束事件 /
+    // Use UART RX timeout as a frame-end fallback when RXIFG does not fire again.
     case RxTimeoutMode::BYTE_INTERRUPT:
+      return DL_UART_INTERRUPT_RX_TIMEOUT_ERROR;
     default:
-      return 0;
+      return DL_UART_INTERRUPT_RX_TIMEOUT_ERROR;
   }
+}
+
+bool MSPM0UART::UseContinuousRxTimeout() const
+{
+  return rx_timeout_mode_ == RxTimeoutMode::BYTE_INTERRUPT;
 }
 
 uint32_t MSPM0UART::GetTimeoutInterruptEnabledMask() const
@@ -331,9 +347,10 @@ void MSPM0UART::ApplyRxTimeoutMode()
       break;
 
     // [BYTE路径 / BYTE path] 仅保留按字节 RX 中断，不依赖超时中断。
-    // [BYTE路径 / BYTE path] Keep plain per-byte RX interrupt; no timeout IRQ.
+    // [BYTE路径 / BYTE path] Keep per-byte RX interrupt and add RX timeout fallback.
     case RxTimeoutMode::BYTE_INTERRUPT:
     default:
+      DL_UART_setRXInterruptTimeout(res_.instance, BYTE_MODE_RX_TIMEOUT);
       break;
   }
 }
@@ -436,6 +453,7 @@ void MSPM0UART::HandleRxInterrupt(uint32_t timeout_mask)
   }
 
   if (timeout_mask != 0U &&
+      !UseContinuousRxTimeout() &&
       read_port_->busy_.load(std::memory_order_relaxed) != ReadPort::BusyState::PENDING)
   {
     // 无挂起读请求时关闭超时中断，减少无意义 IRQ / Disable timeout IRQ when no
@@ -467,8 +485,8 @@ void MSPM0UART::DrainRxFIFO(bool& received, bool& pushed)
 
 void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask)
 {
-  // [BYTE路径 / BYTE path] timeout_mask=0，直接返回；本函数实际只在 LIN 路径生效。
-  // In BYTE path timeout_mask is 0, so this function is effectively LIN-only.
+  // timeout IRQ is used as a frame boundary in LIN mode and as a fallback flush in
+  // BYTE mode.
   if ((timeout_mask == 0U) || ((pending & timeout_mask) == 0U))
   {
     return;
@@ -499,7 +517,10 @@ void MSPM0UART::HandleRxTimeoutInterrupt(uint32_t pending, uint32_t timeout_mask
   // Timeout is a frame/readiness boundary, not a read error. Read(size=0) waiters
   // complete through ProcessPendingReads() once bytes are queued; exact-size reads keep
   // waiting until enough bytes arrive or their own BLOCK timeout fires.
-  DL_UART_disableInterrupt(res_.instance, timeout_mask);
+  if (!UseContinuousRxTimeout())
+  {
+    DL_UART_disableInterrupt(res_.instance, timeout_mask);
+  }
 }
 
 void MSPM0UART::HandleTxInterrupt(bool in_isr)
@@ -559,6 +580,17 @@ void MSPM0UART::HandleTxInterrupt(bool in_isr)
 
 void MSPM0UART::HandleErrorInterrupt(DL_UART_IIDX iidx)
 {
+  if (iidx == DL_UART_IIDX_OVERRUN_ERROR)
+  {
+    bool received = false;
+    bool pushed = false;
+    DrainRxFIFO(received, pushed);
+    if (pushed)
+    {
+      read_port_->ProcessPendingReads(true);
+    }
+  }
+
   uint32_t clear_mask = 0;
 
   switch (iidx)

@@ -258,3 +258,13 @@ void MSPM0GPIO::OnInterruptDispatch(GPIO_Regs* port, int port_idx)
     }
   }
 }
+
+extern "C" void GROUP1_IRQHandler(void)
+{
+#ifdef GPIOA_BASE
+  LibXR::MSPM0GPIO::OnInterrupt(GPIOA);
+#endif
+#ifdef GPIOB_BASE
+  LibXR::MSPM0GPIO::OnInterrupt(GPIOB);
+#endif
+}

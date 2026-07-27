@@ -90,7 +90,7 @@ bool mspm0_i2c_resolve_dma_triggers(I2C_Regs* instance, uint8_t& tx_trigger,
 
 constexpr uint16_t mspm0_i2c_to_addr7(uint16_t slave_addr)
 {
-  return static_cast<uint16_t>((slave_addr >> 1) & 0x7F);
+  return static_cast<uint16_t>(slave_addr & 0x7F);
 }
 
 void mspm0_i2c_recover_controller(I2C_Regs* instance)

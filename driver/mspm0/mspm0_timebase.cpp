@@ -45,7 +45,9 @@ MillisecondTimestamp MSPM0Timebase::_get_milliseconds() { return sys_tick_ms; }
 void MSPM0Timebase::OnSysTickInterrupt() { sys_tick_ms++; }
 void MSPM0Timebase::Sync(uint32_t ticks) { sys_tick_ms = ticks; }
 
+#if !defined(LIBXR_SYSTEM_freertos)
 extern "C" void SysTick_Handler(void)  // NOLINT
 {
   LibXR::MSPM0Timebase::OnSysTickInterrupt();
 }
+#endif

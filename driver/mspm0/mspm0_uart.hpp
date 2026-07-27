@@ -39,8 +39,6 @@ class MSPM0UART : public UART
                                                    uint32_t baudrate);
 
   RxTimeoutMode GetRxTimeoutMode() const { return rx_timeout_mode_; }
-  uint32_t GetRxTimeoutCount() const { return rx_timeout_count_; }
-  uint32_t GetRxDropCount() const { return rx_drop_count_; }
   uint32_t GetTimeoutInterruptEnabledMask() const;
   uint32_t GetTimeoutInterruptMaskedStatus() const;
   uint32_t GetTimeoutInterruptRawStatus() const;
@@ -94,6 +92,7 @@ class MSPM0UART : public UART
  private:
   static constexpr uint8_t MAX_UART_INSTANCES = 8;
   static constexpr uint8_t INVALID_INSTANCE_INDEX = 0xFF;
+  static constexpr uint32_t BYTE_MODE_RX_TIMEOUT = 1U;
 
   void HandleInterrupt();
 
@@ -112,6 +111,8 @@ class MSPM0UART : public UART
   RxTimeoutMode ResolveRxTimeoutMode() const;
 
   uint32_t GetTimeoutInterruptMask() const;
+
+  bool UseContinuousRxTimeout() const;
 
   void ResetLinCounter();
 
