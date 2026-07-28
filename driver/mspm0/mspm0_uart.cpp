@@ -17,6 +17,21 @@ static constexpr uint32_t MSPM0_UART_BASE_INTERRUPT_MASK =
     DL_UART_INTERRUPT_RX | DL_UART_INTERRUPT_TX | DL_UART_INTERRUPT_ADDRESS_MATCH |
     MSPM0_UART_RX_ERROR_INTERRUPT_MASK;
 
+static constexpr uint32_t MSPM0_UART_CHANGE_CONFIG_BUSY_SPINS = 32000U;
+
+static void MSPM0_UART_ChangeConfigBounded(UART_Regs* uart)
+{
+  DL_UART_disable(uart);
+  for (uint32_t i = 0; i < MSPM0_UART_CHANGE_CONFIG_BUSY_SPINS; ++i)
+  {
+    if (!DL_UART_isBusy(uart))
+    {
+      break;
+    }
+  }
+  DL_UART_disableFIFOs(uart);
+}
+
 MSPM0UART::MSPM0UART(Resources res, RawData rx_stage_buffer, uint32_t tx_queue_size,
                      uint32_t tx_buffer_size, UART::Configuration config)
     : UART(&_read_port, &_write_port),
@@ -147,7 +162,7 @@ ErrorCode MSPM0UART::SetConfig(UART::Configuration config)
   const DL_UART_STOP_BITS STOP_BITS =
       (config.stop_bits == 2) ? DL_UART_STOP_BITS_TWO : DL_UART_STOP_BITS_ONE;
 
-  DL_UART_changeConfig(res_.instance);
+  MSPM0_UART_ChangeConfigBounded(res_.instance);
 
   DL_UART_setWordLength(res_.instance, word_length);
   DL_UART_setParityMode(res_.instance, parity);
