@@ -15,7 +15,7 @@ and LibXR-subtree layout as XRUSB.
 Enable the subtree through LibXR and supply a SOES checkout:
 
 ```cmake
-set(LIBXR_XRECAT_ENABLE ON)
+set(LIBXR_ETHERCAT_ENABLE ON)
 set(LIBXR_ETHERCAT_SOES_DIR "/path/to/SOES/soes")
 set(LIBXR_ETHERCAT_PROFILE rm) # rm or foc
 ```
