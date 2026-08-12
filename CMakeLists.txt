@@ -206,10 +206,10 @@ if(_xr_driver)
   include(${CMAKE_CURRENT_SOURCE_DIR}/src/driver/usb/CMakeLists.txt)
 endif()
 
-# XRECAT
-option(LIBXR_XRECAT_ENABLE "Build the XRECAT EtherCAT slave subtree" OFF)
-if(LIBXR_XRECAT_ENABLE)
-  include(${CMAKE_CURRENT_SOURCE_DIR}/src/driver/ecat/CMakeLists.txt)
+# EtherCAT (XRECAT subtree)
+option(LIBXR_ETHERCAT_ENABLE "Build the EtherCAT slave subtree" OFF)
+if(LIBXR_ETHERCAT_ENABLE)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/src/driver/ethercat/CMakeLists.txt)
 endif()
 
 if(_xr_system MATCHES "webots")
