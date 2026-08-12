@@ -206,6 +206,12 @@ if(_xr_driver)
   include(${CMAKE_CURRENT_SOURCE_DIR}/src/driver/usb/CMakeLists.txt)
 endif()
 
+# XRECAT
+option(LIBXR_XRECAT_ENABLE "Build the XRECAT EtherCAT slave subtree" OFF)
+if(LIBXR_XRECAT_ENABLE)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/src/driver/ecat/CMakeLists.txt)
+endif()
+
 if(_xr_system MATCHES "webots")
   target_link_directories(${PROJECT_NAME} PUBLIC ${WEBOTS_HOME}/lib/controller)
 
