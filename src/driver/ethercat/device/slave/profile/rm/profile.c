@@ -59,13 +59,3 @@ void ethercat_profile_safe_outputs(void)
     memset(Obj.can1_motor_commnads, 0, sizeof(Obj.can1_motor_commnads));
     Obj.digital_outputs = 0;
 }
-
-void cb_get_inputs(void)
-{
-    ethercat_profile_get_inputs();
-}
-
-void cb_set_outputs(void)
-{
-    ethercat_profile_set_outputs();
-}
