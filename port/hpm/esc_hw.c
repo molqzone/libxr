@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "core/ethercat.h"
 #include "ecat_options.h"
 #include "ecat_slv.h"
 #include "hpm_clock_drv.h"
@@ -662,6 +663,7 @@ void ecat_pdi_isr(void)
                                 ESCREG_ALEVENT_SM3 |
                                 ESCREG_ALEVENT_DC_SYNC0;
 
+    ethercat_slave_enter_isr();
     g_rmgo_ecat_debug_pdi_irq_count++;
     ESC_updateALevent();
     ecat_debug_snapshot(0x3000U);
@@ -679,11 +681,13 @@ void ecat_pdi_isr(void)
             DIG_process(DIG_PROCESS_OUTPUTS_FLAG);
         }
     }
+    ethercat_slave_leave_isr();
 }
 
 SDK_DECLARE_EXT_ISR_M(IRQn_ESC_SYNC0, ecat_sync0_isr)
 void ecat_sync0_isr(void)
 {
+    ethercat_slave_enter_isr();
     g_rmgo_ecat_debug_sync0_irq_count++;
     uint32_t sync_state = 0;
     ESC_read(ESCREG_DC_SYNC_STATUS, &sync_state, sizeof(sync_state));
@@ -692,6 +696,7 @@ void ecat_sync0_isr(void)
     ESC_updateALevent();
     ecat_debug_snapshot(0x3100U);
     DIG_process(DIG_PROCESS_APP_HOOK_FLAG | DIG_PROCESS_INPUTS_FLAG);
+    ethercat_slave_leave_isr();
 }
 
 SDK_DECLARE_EXT_ISR_M(IRQn_ESC_SYNC1, ecat_sync1_isr)

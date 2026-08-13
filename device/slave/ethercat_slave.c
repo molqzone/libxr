@@ -1,4 +1,6 @@
-#include "ethercat.h"
+#include "core/ethercat.h"
+
+#include <stdint.h>
 
 #include "ecat_slv.h"
 #include "esc_hw.h"
@@ -18,8 +20,27 @@ static esc_cfg_t config = {
     .esc_hw_interrupt_disable = ESC_interrupt_disable,
     .esc_hw_eep_handler = ESC_eeprom_emulation_handler,
     .esc_check_dc_handler = ESC_check_dc,
-    .safeoutput_override = ethercat_profile_safe_outputs,
+    .safeoutput_override = ethercat_safe_outputs,
 };
+
+static volatile uint8_t callback_isr_depth;
+
+void ethercat_slave_enter_isr(void)
+{
+    callback_isr_depth++;
+}
+
+void ethercat_slave_leave_isr(void)
+{
+    if (callback_isr_depth > 0U) {
+        callback_isr_depth--;
+    }
+}
+
+bool ethercat_slave_in_isr(void)
+{
+    return callback_isr_depth != 0U;
+}
 
 void ethercat_slave_init(void)
 {
