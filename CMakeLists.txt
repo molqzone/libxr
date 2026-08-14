@@ -208,6 +208,9 @@ endif()
 
 # EtherCAT (XRECAT subtree)
 option(LIBXR_ETHERCAT_ENABLE "Build the EtherCAT slave subtree" OFF)
+target_compile_definitions(
+  ${PROJECT_NAME} PUBLIC LIBXR_ETHERCAT_ENABLE=$<BOOL:${LIBXR_ETHERCAT_ENABLE}>
+)
 if(LIBXR_ETHERCAT_ENABLE)
   include(${CMAKE_CURRENT_SOURCE_DIR}/src/driver/ethercat/CMakeLists.txt)
 endif()
