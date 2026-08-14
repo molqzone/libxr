@@ -8,63 +8,58 @@
 namespace LibXR::EtherCAT
 {
 
+namespace Detail
+{
+struct CallbackBridge;
+}
+
 /**
- * Thin LibXR facade for one SOES EtherCAT slave instance.
+ * C++ base class for one SOES EtherCAT slave instance.
  *
- * SOES keeps its slave state in global objects and exposes process-data callbacks
- * as global C symbols. Consequently an image can have one active SlaveClass. The
- * application or the hardware driver must provide cb_get_inputs() and
- * cb_set_outputs(), as well as the ESC callbacks in Configuration.
+ * Derive from SlaveClass and override the protected hooks required by the
+ * application or ESC driver. SOES uses global state, so one instance can be
+ * active in an image at a time.
  */
 class SlaveClass
 {
  public:
-  using Hook = void (*)();
-  using StateChangeHook = void (*)(uint8_t* state, uint8_t* notification);
-  using PreDownloadHook = uint32_t (*)(uint16_t index, uint8_t subindex, void* data,
-                                       size_t size, uint16_t flags);
-  using PostDownloadHook = uint32_t (*)(uint16_t index, uint8_t subindex, uint16_t flags);
-  using PreUploadHook = uint32_t (*)(uint16_t index, uint8_t subindex, void* data,
-                                     size_t* size, uint16_t flags);
-  using PostUploadHook = uint32_t (*)(uint16_t index, uint8_t subindex, uint16_t flags);
-  using InterruptHook = void (*)(uint32_t mask);
-  using DcCheckHook = uint16_t (*)();
-  using DeviceIdHook = int (*)(uint16_t* device_id);
-
-  /** XRECAT-owned slave setup data. */
-  struct Configuration
+  enum class ExecutionMode : uint8_t
   {
-    void* user_arg = nullptr;
-    bool use_interrupt = false;
-    int watchdog_count = 0;
-    bool skip_default_initialization = false;
-
-    Hook on_set_defaults = nullptr;
-    StateChangeHook on_pre_state_change = nullptr;
-    StateChangeHook on_post_state_change = nullptr;
-    Hook on_application = nullptr;
-    Hook on_safe_output = nullptr;
-    PreDownloadHook on_pre_object_download = nullptr;
-    PostDownloadHook on_post_object_download = nullptr;
-    PreUploadHook on_pre_object_upload = nullptr;
-    PostUploadHook on_post_object_upload = nullptr;
-    Hook on_rxpdo_override = nullptr;
-    Hook on_txpdo_override = nullptr;
-    InterruptHook on_interrupt_enable = nullptr;
-    InterruptHook on_interrupt_disable = nullptr;
-    Hook on_eeprom_event = nullptr;
-    DcCheckHook on_dc_check = nullptr;
-    DeviceIdHook on_get_device_id = nullptr;
+    POLLING,
+    INTERRUPT,
   };
 
-  explicit SlaveClass(const Configuration& config) : config_(config) {}
+  struct Options
+  {
+    ExecutionMode execution_mode = ExecutionMode::POLLING;
+    int watchdog_count = 0;
+    bool skip_default_initialization = false;
+  };
+
+  struct ObjectAddress
+  {
+    uint16_t index;
+    uint8_t subindex;
+    uint16_t flags;
+  };
+
+  struct ObjectBuffer
+  {
+    void* data;
+    size_t size;
+  };
+
+  using ObjectAccessCode = uint32_t;
+
+  SlaveClass() = default;
+  explicit SlaveClass(const Options& options) : options_(options) {}
 
   SlaveClass(const SlaveClass&) = delete;
   SlaveClass& operator=(const SlaveClass&) = delete;
   SlaveClass(SlaveClass&&) = delete;
   SlaveClass& operator=(SlaveClass&&) = delete;
 
-  ~SlaveClass();
+  virtual ~SlaveClass();
 
   [[nodiscard]] ErrorCode Initialize();
   [[nodiscard]] ErrorCode Poll();
@@ -73,16 +68,67 @@ class SlaveClass
   [[nodiscard]] ErrorCode Run();
 
   [[nodiscard]] bool IsInitialized() const { return initialized_; }
+  [[nodiscard]] Options& GetOptions() { return options_; }
+  [[nodiscard]] const Options& GetOptions() const { return options_; }
 
-  [[nodiscard]] Configuration& GetConfiguration() { return config_; }
-  [[nodiscard]] const Configuration& GetConfiguration() const { return config_; }
-
-  static SlaveClass* Active();
+ protected:
+  virtual void OnSetDefaults() {}
+  virtual void OnPreStateChange(uint8_t& state, uint8_t& notification)
+  {
+    (void)state;
+    (void)notification;
+  }
+  virtual void OnPostStateChange(uint8_t& state, uint8_t& notification)
+  {
+    (void)state;
+    (void)notification;
+  }
+  virtual void OnApplication() {}
+  virtual void OnSafeOutputs() {}
+  virtual void OnInputs() {}
+  virtual void OnOutputs() {}
+  virtual void OnReceiveProcessData() {}
+  virtual void OnTransmitProcessData() {}
+  virtual void OnEnableInterrupt(uint32_t mask) { (void)mask; }
+  virtual void OnDisableInterrupt(uint32_t mask) { (void)mask; }
+  virtual void OnEepromEvent() {}
+  virtual uint16_t OnCheckDistributedClock() { return 0; }
+  virtual ErrorCode OnGetDeviceId(uint16_t& device_id)
+  {
+    (void)device_id;
+    return ErrorCode::NOT_SUPPORT;
+  }
+  virtual ObjectAccessCode OnPreObjectDownload(const ObjectAddress& object,
+                                                const ObjectBuffer& buffer)
+  {
+    (void)object;
+    (void)buffer;
+    return 0;
+  }
+  virtual ObjectAccessCode OnPostObjectDownload(const ObjectAddress& object)
+  {
+    (void)object;
+    return 0;
+  }
+  virtual ObjectAccessCode OnPreObjectUpload(const ObjectAddress& object,
+                                              ObjectBuffer& buffer)
+  {
+    (void)object;
+    (void)buffer;
+    return 0;
+  }
+  virtual ObjectAccessCode OnPostObjectUpload(const ObjectAddress& object)
+  {
+    (void)object;
+    return 0;
+  }
 
  private:
+  friend struct Detail::CallbackBridge;
+
   inline static SlaveClass* active_ = nullptr;
 
-  Configuration config_{};
+  Options options_{};
   bool initialized_ = false;
 };
 
