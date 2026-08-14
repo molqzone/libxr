@@ -27,10 +27,10 @@ namespace LibXR
  * HPM on-chip EtherCAT slave controller adapter.
  *
  * Board code configures ESC pins, EEPROM, and PHY before constructing this
- * object. HPMEtherCATDevice then owns the LibXR protocol core, supplies memory-mapped
+ * object. HPMECATDevice then owns the LibXR protocol core, supplies memory-mapped
  * ESC access, and routes the ESC PDI/SYNC interrupts without any polling path.
  */
-class HPMEtherCATDevice final : public EtherCAT::EscPort
+class HPMECATDevice final : public EtherCAT::EscPort
 {
  public:
   struct Interrupts
@@ -42,17 +42,17 @@ class HPMEtherCATDevice final : public EtherCAT::EscPort
     uint8_t sync_priority = 3;
   };
 
-  HPMEtherCATDevice(ESC_Type& esc, EtherCAT::DevicePool& pool,
+  HPMECATDevice(ESC_Type& esc, EtherCAT::DevicePool& pool,
               std::initializer_list<EtherCAT::DeviceClass*> classes);
-  HPMEtherCATDevice(ESC_Type& esc, EtherCAT::DevicePool& pool,
+  HPMECATDevice(ESC_Type& esc, EtherCAT::DevicePool& pool,
               std::initializer_list<EtherCAT::DeviceClass*> classes,
               Interrupts interrupts);
-  ~HPMEtherCATDevice() override;
+  ~HPMECATDevice() override;
 
-  HPMEtherCATDevice(const HPMEtherCATDevice&) = delete;
-  HPMEtherCATDevice& operator=(const HPMEtherCATDevice&) = delete;
-  HPMEtherCATDevice(HPMEtherCATDevice&&) = delete;
-  HPMEtherCATDevice& operator=(HPMEtherCATDevice&&) = delete;
+  HPMECATDevice(const HPMECATDevice&) = delete;
+  HPMECATDevice& operator=(const HPMECATDevice&) = delete;
+  HPMECATDevice(HPMECATDevice&&) = delete;
+  HPMECATDevice& operator=(HPMECATDevice&&) = delete;
 
   ErrorCode Read(uint16_t address, RawData data) override;
   ErrorCode Write(uint16_t address, ConstRawData data) override;
@@ -83,7 +83,7 @@ class HPMEtherCATDevice final : public EtherCAT::EscPort
   Interrupts interrupts_;
   EtherCAT::DeviceCore core_;
 
-  static inline HPMEtherCATDevice* instance_ = nullptr;
+  static inline HPMECATDevice* instance_ = nullptr;
 };
 
 }  // namespace LibXR
