@@ -18,13 +18,15 @@ enum class EscEvent : uint32_t
   NONE = 0,
   AL_CONTROL = 1U << 0U,
   SYNC_MANAGER_CHANGE = 1U << 1U,
-  MAILBOX = 1U << 2U,
-  PROCESS_DATA_OUTPUT = 1U << 3U,
-  PROCESS_DATA_INPUT = 1U << 4U,
-  WATCHDOG = 1U << 5U,
-  EEPROM = 1U << 6U,
-  SYNC0 = 1U << 7U,
-  SYNC1 = 1U << 8U
+  SYNC_MANAGER = 1U << 2U,
+  MAILBOX = 1U << 3U,
+  PROCESS_DATA_OUTPUT = 1U << 4U,
+  PROCESS_DATA_INPUT = 1U << 5U,
+  WATCHDOG = 1U << 6U,
+  EEPROM = 1U << 7U,
+  SYNC0 = 1U << 8U,
+  SYNC1 = 1U << 9U,
+  DISTRIBUTED_CLOCK_LATCH = 1U << 10U
 };
 
 constexpr EscEvent operator|(EscEvent left, EscEvent right)
