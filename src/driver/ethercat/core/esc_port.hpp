@@ -1,0 +1,60 @@
+#pragma once
+
+#include <cstdint>
+
+#include "core/libxr_type.hpp"
+
+namespace LibXR::EtherCAT
+{
+
+/**
+ * Normalized events delivered by the board ESC driver.
+ *
+ * The driver translates controller-specific interrupt status into these
+ * protocol events before calling SlaveCore::HandleInterrupt().
+ */
+enum class EscEvent : uint32_t
+{
+  NONE = 0,
+  AL_CONTROL = 1U << 0U,
+  SYNC_MANAGER_CHANGE = 1U << 1U,
+  MAILBOX = 1U << 2U,
+  PROCESS_DATA_OUTPUT = 1U << 3U,
+  PROCESS_DATA_INPUT = 1U << 4U,
+  WATCHDOG = 1U << 5U,
+  EEPROM = 1U << 6U,
+  SYNC0 = 1U << 7U,
+  SYNC1 = 1U << 8U
+};
+
+constexpr EscEvent operator|(EscEvent left, EscEvent right)
+{
+  return static_cast<EscEvent>(static_cast<uint32_t>(left) | static_cast<uint32_t>(right));
+}
+
+constexpr EscEvent operator&(EscEvent left, EscEvent right)
+{
+  return static_cast<EscEvent>(static_cast<uint32_t>(left) & static_cast<uint32_t>(right));
+}
+
+constexpr bool HasEvent(EscEvent events, EscEvent event)
+{
+  return (static_cast<uint32_t>(events) & static_cast<uint32_t>(event)) != 0U;
+}
+
+/**
+ * ESC register access supplied by a board driver.
+ *
+ * This interface deliberately has no SPI, DMA, GPIO, or IRQ configuration
+ * details. Those belong to the concrete board driver.
+ */
+class EscPort
+{
+ public:
+  virtual ~EscPort() = default;
+
+  virtual ErrorCode Read(uint16_t address, RawData data) = 0;
+  virtual ErrorCode Write(uint16_t address, ConstRawData data) = 0;
+};
+
+}  // namespace LibXR::EtherCAT
