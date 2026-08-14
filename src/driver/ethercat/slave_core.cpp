@@ -1,14 +1,8 @@
-#pragma once
+#include "slave_core.hpp"
 
-// This file is an implementation detail of slave_class.hpp. It owns the C
-// callback bridge and the translation to the SOES stack configuration.
-#ifdef __cplusplus
 extern "C" {
-#endif
 #include "ecat_slv.h"
-#ifdef __cplusplus
 }
-#endif
 
 namespace LibXR::EtherCAT::Detail
 {
@@ -101,8 +95,8 @@ struct CallbackBridge
     if (auto* core = Active(); core != nullptr)
     {
       ObjectBuffer buffer{data, size == nullptr ? 0u : *size};
-      const ObjectAccessCode code =
-          core->DispatchPreObjectUpload({index, subindex, flags}, buffer);
+      const ObjectAccessCode code = core->DispatchPreObjectUpload({index, subindex, flags},
+                                                                    buffer);
       if (size != nullptr)
       {
         *size = buffer.size;
@@ -180,9 +174,9 @@ struct CallbackBridge
   }
 };
 
-inline esc_cfg_t soes_configuration{};
+esc_cfg_t soes_configuration{};
 
-inline esc_cfg_t MakeSoesConfiguration(SlaveCore& core)
+esc_cfg_t MakeSoesConfiguration(SlaveCore& core)
 {
   esc_cfg_t soes_config{};
   soes_config.user_arg = &core;
@@ -210,31 +204,24 @@ inline esc_cfg_t MakeSoesConfiguration(SlaveCore& core)
 
 }  // namespace LibXR::EtherCAT::Detail
 
-#if defined(__GNUC__) || defined(__clang__)
-#define LIBXR_ETHERCAT_DETAIL_USED __attribute__((used))
-#else
-#define LIBXR_ETHERCAT_DETAIL_USED
-#endif
-
-extern "C" inline LIBXR_ETHERCAT_DETAIL_USED void cb_get_inputs()
+extern "C" void cb_get_inputs()
 {
   LibXR::EtherCAT::Detail::CallbackBridge::Inputs();
 }
 
-extern "C" inline LIBXR_ETHERCAT_DETAIL_USED void cb_set_outputs()
+extern "C" void cb_set_outputs()
 {
   LibXR::EtherCAT::Detail::CallbackBridge::Outputs();
 }
 
-#undef LIBXR_ETHERCAT_DETAIL_USED
-
 namespace LibXR::EtherCAT
 {
 
-inline SlaveCore::SlaveCore(SlaveClass& slave) : SlaveCore(slave, Options{}) {}
+SlaveCore* SlaveCore::active_ = nullptr;
 
-inline SlaveCore::SlaveCore(SlaveClass& slave, const Options& options)
-    : slave_(slave), options_(options)
+SlaveCore::SlaveCore(SlaveClass& slave) : SlaveCore(slave, Options{}) {}
+
+SlaveCore::SlaveCore(SlaveClass& slave, const Options& options) : slave_(slave), options_(options)
 {
   ASSERT(active_ == nullptr);
   active_ = this;
@@ -242,7 +229,7 @@ inline SlaveCore::SlaveCore(SlaveClass& slave, const Options& options)
   ecat_slv_init(&Detail::soes_configuration);
 }
 
-inline SlaveCore::~SlaveCore()
+SlaveCore::~SlaveCore()
 {
   if (active_ == this)
   {
@@ -250,9 +237,108 @@ inline SlaveCore::~SlaveCore()
   }
 }
 
-inline void SlaveCore::HandleInterrupt(uint32_t event_mask)
+void SlaveCore::HandleInterrupt(uint32_t event_mask)
 {
   ecat_slv_worker(event_mask);
+}
+
+const SlaveCore::Options& SlaveCore::GetOptions() const
+{
+  return options_;
+}
+
+void SlaveCore::DispatchSetDefaults()
+{
+  slave_.OnSetDefaults();
+}
+
+void SlaveCore::DispatchPreStateChange(uint8_t& state, uint8_t& notification)
+{
+  slave_.OnPreStateChange(state, notification);
+}
+
+void SlaveCore::DispatchPostStateChange(uint8_t& state, uint8_t& notification)
+{
+  slave_.OnPostStateChange(state, notification);
+}
+
+void SlaveCore::DispatchApplication()
+{
+  slave_.OnApplication();
+}
+
+void SlaveCore::DispatchSafeOutputs()
+{
+  slave_.OnSafeOutputs();
+}
+
+void SlaveCore::DispatchInputs()
+{
+  slave_.OnInputs();
+}
+
+void SlaveCore::DispatchOutputs()
+{
+  slave_.OnOutputs();
+}
+
+void SlaveCore::DispatchReceiveProcessData()
+{
+  slave_.OnReceiveProcessData();
+}
+
+void SlaveCore::DispatchTransmitProcessData()
+{
+  slave_.OnTransmitProcessData();
+}
+
+void SlaveCore::DispatchEnableInterrupt(uint32_t mask)
+{
+  slave_.OnEnableInterrupt(mask);
+}
+
+void SlaveCore::DispatchDisableInterrupt(uint32_t mask)
+{
+  slave_.OnDisableInterrupt(mask);
+}
+
+void SlaveCore::DispatchEepromEvent()
+{
+  slave_.OnEepromEvent();
+}
+
+uint16_t SlaveCore::DispatchCheckDistributedClock()
+{
+  return slave_.OnCheckDistributedClock();
+}
+
+ErrorCode SlaveCore::DispatchGetDeviceId(uint16_t& device_id)
+{
+  return slave_.OnGetDeviceId(device_id);
+}
+
+SlaveClass::ObjectAccessCode SlaveCore::DispatchPreObjectDownload(
+    const SlaveClass::ObjectAddress& object, const SlaveClass::ObjectBuffer& buffer)
+{
+  return slave_.OnPreObjectDownload(object, buffer);
+}
+
+SlaveClass::ObjectAccessCode SlaveCore::DispatchPostObjectDownload(
+    const SlaveClass::ObjectAddress& object)
+{
+  return slave_.OnPostObjectDownload(object);
+}
+
+SlaveClass::ObjectAccessCode SlaveCore::DispatchPreObjectUpload(
+    const SlaveClass::ObjectAddress& object, SlaveClass::ObjectBuffer& buffer)
+{
+  return slave_.OnPreObjectUpload(object, buffer);
+}
+
+SlaveClass::ObjectAccessCode SlaveCore::DispatchPostObjectUpload(
+    const SlaveClass::ObjectAddress& object)
+{
+  return slave_.OnPostObjectUpload(object);
 }
 
 }  // namespace LibXR::EtherCAT
