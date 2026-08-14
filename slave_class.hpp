@@ -2,7 +2,13 @@
 
 // SOES remains an application/driver dependency. XRECAT only wraps its slave
 // lifecycle and does not provide an ESC port, object dictionary, or process data model.
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include "ecat_slv.h"
+#ifdef __cplusplus
+}
+#endif
 
 #include "core/libxr_def.hpp"
 
@@ -107,4 +113,3 @@ class SlaveClass
 };
 
 }  // namespace LibXR::EtherCAT
-
