@@ -15,5 +15,6 @@ from its ESC IRQ path. It owns any SOES process-data scheduling required by that
 The standalone CMake file exports this include directory and builds `slave_core.cpp`
 into an existing LibXR target. When `LIBXR_ETHERCAT_ENABLE` is enabled,
 `LIBXR_ETHERCAT_SOES_DIR` must point to the SOES `soes/` directory containing
-`ecat_slv.h`; XRECAT uses it for headers only and never adds SOES protocol or hardware
-sources.
+`ecat_slv.h`, and `LIBXR_ETHERCAT_CONFIG_DIR` must point to the application directory
+containing `ecat_options.h`. XRECAT uses these for headers only and never adds SOES
+protocol or hardware sources.
