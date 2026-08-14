@@ -18,7 +18,7 @@ extern "C"
 }
 
 #include "ethercat/core/esc_port.hpp"
-#include "ethercat/device/slave_core.hpp"
+#include "ethercat/device/device_core.hpp"
 
 namespace LibXR
 {
@@ -27,10 +27,10 @@ namespace LibXR
  * HPM on-chip EtherCAT slave controller adapter.
  *
  * Board code configures ESC pins, EEPROM, and PHY before constructing this
- * object. HPMEtherCAT then owns the LibXR protocol core, supplies memory-mapped
+ * object. HPMEtherCATDevice then owns the LibXR protocol core, supplies memory-mapped
  * ESC access, and routes the ESC PDI/SYNC interrupts without any polling path.
  */
-class HPMEtherCAT final : public EtherCAT::EscPort
+class HPMEtherCATDevice final : public EtherCAT::EscPort
 {
  public:
   struct Interrupts
@@ -42,23 +42,23 @@ class HPMEtherCAT final : public EtherCAT::EscPort
     uint8_t sync_priority = 3;
   };
 
-  HPMEtherCAT(ESC_Type& esc, EtherCAT::SlavePool& pool,
-              std::initializer_list<EtherCAT::SlaveClass*> classes);
-  HPMEtherCAT(ESC_Type& esc, EtherCAT::SlavePool& pool,
-              std::initializer_list<EtherCAT::SlaveClass*> classes,
+  HPMEtherCATDevice(ESC_Type& esc, EtherCAT::DevicePool& pool,
+              std::initializer_list<EtherCAT::DeviceClass*> classes);
+  HPMEtherCATDevice(ESC_Type& esc, EtherCAT::DevicePool& pool,
+              std::initializer_list<EtherCAT::DeviceClass*> classes,
               Interrupts interrupts);
-  ~HPMEtherCAT() override;
+  ~HPMEtherCATDevice() override;
 
-  HPMEtherCAT(const HPMEtherCAT&) = delete;
-  HPMEtherCAT& operator=(const HPMEtherCAT&) = delete;
-  HPMEtherCAT(HPMEtherCAT&&) = delete;
-  HPMEtherCAT& operator=(HPMEtherCAT&&) = delete;
+  HPMEtherCATDevice(const HPMEtherCATDevice&) = delete;
+  HPMEtherCATDevice& operator=(const HPMEtherCATDevice&) = delete;
+  HPMEtherCATDevice(HPMEtherCATDevice&&) = delete;
+  HPMEtherCATDevice& operator=(HPMEtherCATDevice&&) = delete;
 
   ErrorCode Read(uint16_t address, RawData data) override;
   ErrorCode Write(uint16_t address, ConstRawData data) override;
 
-  [[nodiscard]] EtherCAT::SlaveState GetState() const { return core_.GetState(); }
-  [[nodiscard]] const EtherCAT::SlaveComposition& GetComposition() const
+  [[nodiscard]] EtherCAT::AlState GetState() const { return core_.GetState(); }
+  [[nodiscard]] const EtherCAT::DeviceComposition& GetComposition() const
   {
     return core_.GetComposition();
   }
@@ -81,9 +81,9 @@ class HPMEtherCAT final : public EtherCAT::EscPort
 
   ESC_Type& esc_;
   Interrupts interrupts_;
-  EtherCAT::SlaveCore core_;
+  EtherCAT::DeviceCore core_;
 
-  static inline HPMEtherCAT* instance_ = nullptr;
+  static inline HPMEtherCATDevice* instance_ = nullptr;
 };
 
 }  // namespace LibXR

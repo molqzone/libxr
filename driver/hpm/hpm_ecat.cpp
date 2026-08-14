@@ -5,15 +5,15 @@
 namespace LibXR
 {
 
-HPMEtherCAT::HPMEtherCAT(ESC_Type& esc, EtherCAT::SlavePool& pool,
-                         std::initializer_list<EtherCAT::SlaveClass*> classes)
-    : HPMEtherCAT(esc, pool, classes,
+HPMEtherCATDevice::HPMEtherCATDevice(ESC_Type& esc, EtherCAT::DevicePool& pool,
+                         std::initializer_list<EtherCAT::DeviceClass*> classes)
+    : HPMEtherCATDevice(esc, pool, classes,
                   {IRQn_ESC, IRQn_ESC_SYNC0, IRQn_ESC_SYNC1, 4, 3})
 {
 }
 
-HPMEtherCAT::HPMEtherCAT(ESC_Type& esc, EtherCAT::SlavePool& pool,
-                         std::initializer_list<EtherCAT::SlaveClass*> classes,
+HPMEtherCATDevice::HPMEtherCATDevice(ESC_Type& esc, EtherCAT::DevicePool& pool,
+                         std::initializer_list<EtherCAT::DeviceClass*> classes,
                          Interrupts interrupts)
     : esc_(esc), interrupts_(interrupts), core_(*this, pool, classes)
 {
@@ -27,7 +27,7 @@ HPMEtherCAT::HPMEtherCAT(ESC_Type& esc, EtherCAT::SlavePool& pool,
   EnableInterrupts();
 }
 
-HPMEtherCAT::~HPMEtherCAT()
+HPMEtherCATDevice::~HPMEtherCATDevice()
 {
   if (instance_ == this)
   {
@@ -36,7 +36,7 @@ HPMEtherCAT::~HPMEtherCAT()
   }
 }
 
-ErrorCode HPMEtherCAT::Read(uint16_t address, RawData data)
+ErrorCode HPMEtherCATDevice::Read(uint16_t address, RawData data)
 {
   if (data.addr_ == nullptr && data.size_ != 0U)
   {
@@ -56,7 +56,7 @@ ErrorCode HPMEtherCAT::Read(uint16_t address, RawData data)
   return ErrorCode::OK;
 }
 
-ErrorCode HPMEtherCAT::Write(uint16_t address, ConstRawData data)
+ErrorCode HPMEtherCATDevice::Write(uint16_t address, ConstRawData data)
 {
   if (data.addr_ == nullptr && data.size_ != 0U)
   {
@@ -76,7 +76,7 @@ ErrorCode HPMEtherCAT::Write(uint16_t address, ConstRawData data)
   return ErrorCode::OK;
 }
 
-void HPMEtherCAT::OnPdiInterrupt()
+void HPMEtherCATDevice::OnPdiInterrupt()
 {
   if (instance_ != nullptr)
   {
@@ -84,7 +84,7 @@ void HPMEtherCAT::OnPdiInterrupt()
   }
 }
 
-void HPMEtherCAT::OnSync0Interrupt()
+void HPMEtherCATDevice::OnSync0Interrupt()
 {
   if (instance_ == nullptr)
   {
@@ -95,7 +95,7 @@ void HPMEtherCAT::OnSync0Interrupt()
   instance_->core_.HandleInterrupt(EtherCAT::EscEvent::SYNC0);
 }
 
-void HPMEtherCAT::OnSync1Interrupt()
+void HPMEtherCATDevice::OnSync1Interrupt()
 {
   if (instance_ == nullptr)
   {
@@ -106,7 +106,7 @@ void HPMEtherCAT::OnSync1Interrupt()
   instance_->core_.HandleInterrupt(EtherCAT::EscEvent::SYNC1);
 }
 
-EtherCAT::EscEvent HPMEtherCAT::ReadPdiEvents() const
+EtherCAT::EscEvent HPMEtherCATDevice::ReadPdiEvents() const
 {
   const uint32_t raw_events = esc_.AL_EVT_REQ;
   EtherCAT::EscEvent events = EtherCAT::EscEvent::NONE;
@@ -146,7 +146,7 @@ EtherCAT::EscEvent HPMEtherCAT::ReadPdiEvents() const
   return events;
 }
 
-void HPMEtherCAT::EnableInterrupts()
+void HPMEtherCATDevice::EnableInterrupts()
 {
 #if defined(HPM_IP_FEATURE_ESC_SYNC_IRQ_MASK) && HPM_IP_FEATURE_ESC_SYNC_IRQ_MASK
   esc_enable_sync_irq_to_pdi_irq(&esc_, false, false);
@@ -158,7 +158,7 @@ void HPMEtherCAT::EnableInterrupts()
   intc_m_enable_irq_with_priority(interrupts_.pdi, interrupts_.pdi_priority);
 }
 
-void HPMEtherCAT::DisableInterrupts()
+void HPMEtherCATDevice::DisableInterrupts()
 {
   intc_m_disable_irq(interrupts_.pdi);
   intc_m_disable_irq(interrupts_.sync0);
