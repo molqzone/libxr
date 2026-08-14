@@ -8,6 +8,8 @@ endif()
 # application or by a board driver.
 set(LIBXR_ETHERCAT_SOES_DIR "" CACHE PATH
     "Path to the SOES source directory containing ecat_slv.h")
+set(LIBXR_ETHERCAT_CONFIG_DIR "" CACHE PATH
+    "Path to the application directory containing ecat_options.h")
 
 if(NOT EXISTS "${LIBXR_ETHERCAT_SOES_DIR}/ecat_slv.h")
   message(FATAL_ERROR
@@ -21,10 +23,17 @@ if(NOT EXISTS "${LIBXR_ETHERCAT_SOES_DIR}/include/sys/gcc/cc.h")
           "port.")
 endif()
 
+if(NOT EXISTS "${LIBXR_ETHERCAT_CONFIG_DIR}/ecat_options.h")
+  message(FATAL_ERROR
+          "LIBXR_ETHERCAT_CONFIG_DIR must point to the application directory containing "
+          "ecat_options.h.")
+endif()
+
 target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
 target_include_directories(
   ${PROJECT_NAME}
   PRIVATE "${LIBXR_ETHERCAT_SOES_DIR}"
           "${LIBXR_ETHERCAT_SOES_DIR}/include/sys/gcc"
+          "${LIBXR_ETHERCAT_CONFIG_DIR}"
 )
 target_sources(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/slave_core.cpp")
