@@ -13,4 +13,7 @@ supplies the SOES sources and ESC/PDI port, then calls `SlaveCore::HandleInterru
 from its ESC IRQ path. It owns any SOES process-data scheduling required by that port.
 
 The standalone CMake file exports this include directory and builds `slave_core.cpp`
-into an existing LibXR target; it never adds SOES protocol or hardware sources.
+into an existing LibXR target. When `LIBXR_ETHERCAT_ENABLE` is enabled,
+`LIBXR_ETHERCAT_SOES_DIR` must point to the SOES `soes/` directory containing
+`ecat_slv.h`; XRECAT uses it for headers only and never adds SOES protocol or hardware
+sources.
