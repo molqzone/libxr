@@ -8,27 +8,23 @@
 namespace LibXR::EtherCAT
 {
 
+class SlaveCore;
+
 namespace Detail
 {
 struct CallbackBridge;
 }
 
 /**
- * C++ base class for one SOES EtherCAT slave instance.
+ * EtherCAT device-class base, analogous to LibXR::USB::DeviceClass.
  *
- * Derive from SlaveClass and override the protected hooks required by the
- * application or ESC driver. SOES uses global state, so one instance can be
- * active in an image at a time.
+ * Derive from SlaveClass to implement application and board-driver hooks. A
+ * SlaveCore constructed with this completed object owns SOES startup and IRQ
+ * dispatch.
  */
 class SlaveClass
 {
  public:
-  struct Options
-  {
-    int watchdog_count = 0;
-    bool skip_default_initialization = false;
-  };
-
   struct ObjectAddress
   {
     uint16_t index;
@@ -44,22 +40,7 @@ class SlaveClass
 
   using ObjectAccessCode = uint32_t;
 
-  SlaveClass() = default;
-  explicit SlaveClass(const Options& options) : options_(options) {}
-
-  SlaveClass(const SlaveClass&) = delete;
-  SlaveClass& operator=(const SlaveClass&) = delete;
-  SlaveClass(SlaveClass&&) = delete;
-  SlaveClass& operator=(SlaveClass&&) = delete;
-
-  virtual ~SlaveClass();
-
-  [[nodiscard]] ErrorCode Initialize();
-  [[nodiscard]] ErrorCode HandleInterrupt(uint32_t event_mask);
-
-  [[nodiscard]] bool IsInitialized() const { return initialized_; }
-  [[nodiscard]] Options& GetOptions() { return options_; }
-  [[nodiscard]] const Options& GetOptions() const { return options_; }
+  virtual ~SlaveClass() = default;
 
  protected:
   virtual void OnSetDefaults() {}
@@ -114,12 +95,92 @@ class SlaveClass
   }
 
  private:
+  friend class SlaveCore;
+};
+
+/**
+ * SOES runtime core, analogous to LibXR::USB::DeviceCore.
+ *
+ * Construct this after the SlaveClass-derived device object. SOES uses global
+ * state, so one SlaveCore can be active in an image at a time.
+ */
+class SlaveCore final
+{
+ public:
+  struct Options
+  {
+    int watchdog_count = 0;
+  };
+
+  explicit SlaveCore(SlaveClass& slave);
+  SlaveCore(SlaveClass& slave, const Options& options);
+
+  SlaveCore(const SlaveCore&) = delete;
+  SlaveCore& operator=(const SlaveCore&) = delete;
+  SlaveCore(SlaveCore&&) = delete;
+  SlaveCore& operator=(SlaveCore&&) = delete;
+
+  ~SlaveCore();
+
+  /** Dispatch a low-priority ESC interrupt event mask from the board driver. */
+  void HandleInterrupt(uint32_t event_mask);
+
+  [[nodiscard]] const Options& GetOptions() const { return options_; }
+
+ private:
   friend struct Detail::CallbackBridge;
 
-  inline static SlaveClass* active_ = nullptr;
+  void DispatchSetDefaults() { slave_.OnSetDefaults(); }
+  void DispatchPreStateChange(uint8_t& state, uint8_t& notification)
+  {
+    slave_.OnPreStateChange(state, notification);
+  }
+  void DispatchPostStateChange(uint8_t& state, uint8_t& notification)
+  {
+    slave_.OnPostStateChange(state, notification);
+  }
+  void DispatchApplication() { slave_.OnApplication(); }
+  void DispatchSafeOutputs() { slave_.OnSafeOutputs(); }
+  void DispatchInputs() { slave_.OnInputs(); }
+  void DispatchOutputs() { slave_.OnOutputs(); }
+  void DispatchReceiveProcessData() { slave_.OnReceiveProcessData(); }
+  void DispatchTransmitProcessData() { slave_.OnTransmitProcessData(); }
+  void DispatchEnableInterrupt(uint32_t mask) { slave_.OnEnableInterrupt(mask); }
+  void DispatchDisableInterrupt(uint32_t mask) { slave_.OnDisableInterrupt(mask); }
+  void DispatchEepromEvent() { slave_.OnEepromEvent(); }
+  [[nodiscard]] uint16_t DispatchCheckDistributedClock()
+  {
+    return slave_.OnCheckDistributedClock();
+  }
+  [[nodiscard]] ErrorCode DispatchGetDeviceId(uint16_t& device_id)
+  {
+    return slave_.OnGetDeviceId(device_id);
+  }
+  [[nodiscard]] SlaveClass::ObjectAccessCode DispatchPreObjectDownload(
+      const SlaveClass::ObjectAddress& object, const SlaveClass::ObjectBuffer& buffer)
+  {
+    return slave_.OnPreObjectDownload(object, buffer);
+  }
+  [[nodiscard]] SlaveClass::ObjectAccessCode DispatchPostObjectDownload(
+      const SlaveClass::ObjectAddress& object)
+  {
+    return slave_.OnPostObjectDownload(object);
+  }
+  [[nodiscard]] SlaveClass::ObjectAccessCode DispatchPreObjectUpload(
+      const SlaveClass::ObjectAddress& object, SlaveClass::ObjectBuffer& buffer)
+  {
+    return slave_.OnPreObjectUpload(object, buffer);
+  }
+  [[nodiscard]] SlaveClass::ObjectAccessCode DispatchPostObjectUpload(
+      const SlaveClass::ObjectAddress& object)
+  {
+    return slave_.OnPostObjectUpload(object);
+  }
 
+  inline static SlaveCore* active_ = nullptr;
+
+  SlaveClass& slave_;
   Options options_{};
-  bool initialized_ = false;
 };
 
 }  // namespace LibXR::EtherCAT
