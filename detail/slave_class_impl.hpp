@@ -18,79 +18,79 @@ struct CallbackBridge
   using ObjectAccessCode = SlaveClass::ObjectAccessCode;
   using ObjectBuffer = SlaveClass::ObjectBuffer;
 
-  static SlaveClass* Active() { return SlaveClass::active_; }
+  static SlaveCore* Active() { return SlaveCore::active_; }
 
   static void SetDefaults()
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnSetDefaults();
+      core->DispatchSetDefaults();
     }
   }
 
   static void PreStateChange(uint8_t* state, uint8_t* notification)
   {
-    if (auto* slave = Active(); slave != nullptr && state != nullptr && notification != nullptr)
+    if (auto* core = Active(); core != nullptr && state != nullptr && notification != nullptr)
     {
-      slave->OnPreStateChange(*state, *notification);
+      core->DispatchPreStateChange(*state, *notification);
     }
   }
 
   static void PostStateChange(uint8_t* state, uint8_t* notification)
   {
-    if (auto* slave = Active(); slave != nullptr && state != nullptr && notification != nullptr)
+    if (auto* core = Active(); core != nullptr && state != nullptr && notification != nullptr)
     {
-      slave->OnPostStateChange(*state, *notification);
+      core->DispatchPostStateChange(*state, *notification);
     }
   }
 
   static void Application()
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnApplication();
+      core->DispatchApplication();
     }
   }
 
   static void SafeOutputs()
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnSafeOutputs();
+      core->DispatchSafeOutputs();
     }
   }
 
   static void Inputs()
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnInputs();
+      core->DispatchInputs();
     }
   }
 
   static void Outputs()
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnOutputs();
+      core->DispatchOutputs();
     }
   }
 
   static ObjectAccessCode PreObjectDownload(uint16_t index, uint8_t subindex, void* data,
                                              size_t size, uint16_t flags)
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      return slave->OnPreObjectDownload({index, subindex, flags}, {data, size});
+      return core->DispatchPreObjectDownload({index, subindex, flags}, {data, size});
     }
     return 0;
   }
 
   static ObjectAccessCode PostObjectDownload(uint16_t index, uint8_t subindex, uint16_t flags)
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      return slave->OnPostObjectDownload({index, subindex, flags});
+      return core->DispatchPostObjectDownload({index, subindex, flags});
     }
     return 0;
   }
@@ -98,11 +98,11 @@ struct CallbackBridge
   static ObjectAccessCode PreObjectUpload(uint16_t index, uint8_t subindex, void* data,
                                            size_t* size, uint16_t flags)
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
       ObjectBuffer buffer{data, size == nullptr ? 0u : *size};
       const ObjectAccessCode code =
-          slave->OnPreObjectUpload({index, subindex, flags}, buffer);
+          core->DispatchPreObjectUpload({index, subindex, flags}, buffer);
       if (size != nullptr)
       {
         *size = buffer.size;
@@ -114,67 +114,67 @@ struct CallbackBridge
 
   static ObjectAccessCode PostObjectUpload(uint16_t index, uint8_t subindex, uint16_t flags)
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      return slave->OnPostObjectUpload({index, subindex, flags});
+      return core->DispatchPostObjectUpload({index, subindex, flags});
     }
     return 0;
   }
 
   static void ReceiveProcessData()
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnReceiveProcessData();
+      core->DispatchReceiveProcessData();
     }
   }
 
   static void TransmitProcessData()
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnTransmitProcessData();
+      core->DispatchTransmitProcessData();
     }
   }
 
   static void EnableInterrupt(uint32_t mask)
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnEnableInterrupt(mask);
+      core->DispatchEnableInterrupt(mask);
     }
   }
 
   static void DisableInterrupt(uint32_t mask)
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnDisableInterrupt(mask);
+      core->DispatchDisableInterrupt(mask);
     }
   }
 
   static void EepromEvent()
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      slave->OnEepromEvent();
+      core->DispatchEepromEvent();
     }
   }
 
   static uint16_t CheckDistributedClock()
   {
-    if (auto* slave = Active(); slave != nullptr)
+    if (auto* core = Active(); core != nullptr)
     {
-      return slave->OnCheckDistributedClock();
+      return core->DispatchCheckDistributedClock();
     }
     return 0;
   }
 
   static int GetDeviceId(uint16_t* device_id)
   {
-    if (auto* slave = Active(); slave != nullptr && device_id != nullptr)
+    if (auto* core = Active(); core != nullptr && device_id != nullptr)
     {
-      return static_cast<int>(slave->OnGetDeviceId(*device_id));
+      return static_cast<int>(core->DispatchGetDeviceId(*device_id));
     }
     return static_cast<int>(ErrorCode::PTR_NULL);
   }
@@ -182,13 +182,13 @@ struct CallbackBridge
 
 inline esc_cfg_t soes_configuration{};
 
-inline esc_cfg_t MakeSoesConfiguration(const SlaveClass::Options& options)
+inline esc_cfg_t MakeSoesConfiguration(SlaveCore& core)
 {
   esc_cfg_t soes_config{};
-  soes_config.user_arg = CallbackBridge::Active();
+  soes_config.user_arg = &core;
   soes_config.use_interrupt = 1;
-  soes_config.watchdog_cnt = options.watchdog_count;
-  soes_config.skip_default_initialization = options.skip_default_initialization;
+  soes_config.watchdog_cnt = core.GetOptions().watchdog_count;
+  soes_config.skip_default_initialization = false;
   soes_config.set_defaults_hook = CallbackBridge::SetDefaults;
   soes_config.pre_state_change_hook = CallbackBridge::PreStateChange;
   soes_config.post_state_change_hook = CallbackBridge::PostStateChange;
@@ -231,7 +231,18 @@ extern "C" inline LIBXR_ETHERCAT_DETAIL_USED void cb_set_outputs()
 namespace LibXR::EtherCAT
 {
 
-inline SlaveClass::~SlaveClass()
+inline SlaveCore::SlaveCore(SlaveClass& slave) : SlaveCore(slave, Options{}) {}
+
+inline SlaveCore::SlaveCore(SlaveClass& slave, const Options& options)
+    : slave_(slave), options_(options)
+{
+  ASSERT(active_ == nullptr);
+  active_ = this;
+  Detail::soes_configuration = Detail::MakeSoesConfiguration(*this);
+  ecat_slv_init(&Detail::soes_configuration);
+}
+
+inline SlaveCore::~SlaveCore()
 {
   if (active_ == this)
   {
@@ -239,32 +250,9 @@ inline SlaveClass::~SlaveClass()
   }
 }
 
-inline ErrorCode SlaveClass::Initialize()
+inline void SlaveCore::HandleInterrupt(uint32_t event_mask)
 {
-  if (initialized_)
-  {
-    return ErrorCode::STATE_ERR;
-  }
-  if (active_ != nullptr && active_ != this)
-  {
-    return ErrorCode::BUSY;
-  }
-
-  active_ = this;
-  Detail::soes_configuration = Detail::MakeSoesConfiguration(options_);
-  ecat_slv_init(&Detail::soes_configuration);
-  initialized_ = true;
-  return ErrorCode::OK;
-}
-
-inline ErrorCode SlaveClass::HandleInterrupt(uint32_t event_mask)
-{
-  if (!initialized_)
-  {
-    return ErrorCode::STATE_ERR;
-  }
   ecat_slv_worker(event_mask);
-  return ErrorCode::OK;
 }
 
 }  // namespace LibXR::EtherCAT
