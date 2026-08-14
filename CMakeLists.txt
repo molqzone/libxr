@@ -6,5 +6,25 @@ endif()
 
 # SOES sources, ESC/PDI ports, and object dictionaries are selected by the
 # application or by a board driver.
+set(LIBXR_ETHERCAT_SOES_DIR "" CACHE PATH
+    "Path to the SOES source directory containing ecat_slv.h")
+
+if(NOT EXISTS "${LIBXR_ETHERCAT_SOES_DIR}/ecat_slv.h")
+  message(FATAL_ERROR
+          "LIBXR_ETHERCAT_SOES_DIR must point to the SOES source directory containing "
+          "ecat_slv.h.")
+endif()
+
+if(NOT EXISTS "${LIBXR_ETHERCAT_SOES_DIR}/include/sys/gcc/cc.h")
+  message(FATAL_ERROR
+          "LIBXR_ETHERCAT_SOES_DIR must provide include/sys/gcc/cc.h for the GNU SOES "
+          "port.")
+endif()
+
 target_include_directories(${PROJECT_NAME} PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
+target_include_directories(
+  ${PROJECT_NAME}
+  PRIVATE "${LIBXR_ETHERCAT_SOES_DIR}"
+          "${LIBXR_ETHERCAT_SOES_DIR}/include/sys/gcc"
+)
 target_sources(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/slave_core.cpp")
