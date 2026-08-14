@@ -1,15 +1,15 @@
-#include "slave_core.hpp"
+#include "device_core.hpp"
 
 namespace LibXR::EtherCAT
 {
 
-SlaveCore::SlaveCore(EscPort& port, SlavePool& pool,
-                     std::initializer_list<SlaveClass*> classes)
+DeviceCore::DeviceCore(EscPort& port, DevicePool& pool,
+                     std::initializer_list<DeviceClass*> classes)
     : port_(port), composition_(pool, classes)
 {
 }
 
-void SlaveCore::HandleInterrupt(EscEvent events)
+void DeviceCore::HandleInterrupt(EscEvent events)
 {
   // The board port has already converted its IRQ status to protocol events.
   // PDO packing and unpacking will be added to the native protocol engine;
@@ -28,14 +28,14 @@ void SlaveCore::HandleInterrupt(EscEvent events)
   (void)port_;
 }
 
-void SlaveCore::TransitionTo(SlaveState next_state)
+void DeviceCore::TransitionTo(AlState next_state)
 {
   if (next_state == state_)
   {
     return;
   }
 
-  const SlaveState previous_state = state_;
+  const AlState previous_state = state_;
   state_ = next_state;
   composition_.DispatchStateChanged(previous_state, next_state);
 }

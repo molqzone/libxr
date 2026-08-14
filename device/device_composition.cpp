@@ -1,11 +1,11 @@
-#include "slave_composition.hpp"
+#include "device_composition.hpp"
 
 #include <limits>
 
 namespace LibXR::EtherCAT
 {
 
-Object& SlaveBuilder::AddObject(uint16_t index, ObjectCode code, const char* name)
+Object& DeviceBuilder::AddObject(uint16_t index, ObjectCode code, const char* name)
 {
   ASSERT(name != nullptr);
 
@@ -21,7 +21,7 @@ Object& SlaveBuilder::AddObject(uint16_t index, ObjectCode code, const char* nam
   return object;
 }
 
-ObjectEntry& SlaveBuilder::AddEntry(Object& object, uint8_t subindex, ObjectDataType type,
+ObjectEntry& DeviceBuilder::AddEntry(Object& object, uint8_t subindex, ObjectDataType type,
                                     uint16_t bit_length, ObjectAccess access, const char* name,
                                     RawData storage)
 {
@@ -49,7 +49,7 @@ ObjectEntry& SlaveBuilder::AddEntry(Object& object, uint8_t subindex, ObjectData
   return entry;
 }
 
-Pdo& SlaveBuilder::AddPdo(PdoDirection direction, uint16_t index)
+Pdo& DeviceBuilder::AddPdo(PdoDirection direction, uint16_t index)
 {
   for (size_t pdo_index = 0; pdo_index < pool_.pdo_count_; ++pdo_index)
   {
@@ -63,7 +63,7 @@ Pdo& SlaveBuilder::AddPdo(PdoDirection direction, uint16_t index)
   return pdo;
 }
 
-PdoEntry& SlaveBuilder::Map(Pdo& pdo, ObjectEntry& entry)
+PdoEntry& DeviceBuilder::Map(Pdo& pdo, ObjectEntry& entry)
 {
   ASSERT(&pdo == open_pdo_);
   ASSERT(pdo.owner == &owner_);
@@ -89,29 +89,29 @@ PdoEntry& SlaveBuilder::Map(Pdo& pdo, ObjectEntry& entry)
   return pdo_entry;
 }
 
-SlaveComposition::SlaveComposition(SlavePool& pool,
-                                   std::initializer_list<SlaveClass*> classes)
+DeviceComposition::DeviceComposition(DevicePool& pool,
+                                   std::initializer_list<DeviceClass*> classes)
     : pool_(pool)
 {
   ASSERT(pool_.Empty());
 
-  for (SlaveClass* slave_class : classes)
+  for (DeviceClass* device_class : classes)
   {
-    ASSERT(slave_class != nullptr);
-    pool_.AddClass(*slave_class);
+    ASSERT(device_class != nullptr);
+    pool_.AddClass(*device_class);
   }
 
   for (size_t class_index = 0; class_index < pool_.class_count_; ++class_index)
   {
-    SlaveClass& slave_class = *pool_.storage_.classes[class_index];
-    SlaveBuilder builder(pool_, slave_class);
-    slave_class.Describe(builder);
+    DeviceClass& device_class = *pool_.storage_.classes[class_index];
+    DeviceBuilder builder(pool_, device_class);
+    device_class.Describe(builder);
   }
 
   dictionary_ = ObjectDictionary(pool_.storage_.objects, pool_.object_count_);
 }
 
-const Pdo* SlaveComposition::FindPdo(PdoDirection direction, uint16_t index) const
+const Pdo* DeviceComposition::FindPdo(PdoDirection direction, uint16_t index) const
 {
   for (size_t pdo_index = 0; pdo_index < pool_.pdo_count_; ++pdo_index)
   {
@@ -124,7 +124,7 @@ const Pdo* SlaveComposition::FindPdo(PdoDirection direction, uint16_t index) con
   return nullptr;
 }
 
-void SlaveComposition::DispatchStateChanged(SlaveState from, SlaveState to)
+void DeviceComposition::DispatchStateChanged(AlState from, AlState to)
 {
   for (size_t class_index = 0; class_index < pool_.class_count_; ++class_index)
   {
@@ -132,7 +132,7 @@ void SlaveComposition::DispatchStateChanged(SlaveState from, SlaveState to)
   }
 }
 
-void SlaveComposition::DispatchOutputsUpdated()
+void DeviceComposition::DispatchOutputsUpdated()
 {
   for (size_t class_index = 0; class_index < pool_.class_count_; ++class_index)
   {
@@ -140,7 +140,7 @@ void SlaveComposition::DispatchOutputsUpdated()
   }
 }
 
-void SlaveComposition::DispatchInputsRequested()
+void DeviceComposition::DispatchInputsRequested()
 {
   for (size_t class_index = 0; class_index < pool_.class_count_; ++class_index)
   {
@@ -148,13 +148,13 @@ void SlaveComposition::DispatchInputsRequested()
   }
 }
 
-ErrorCode SlaveComposition::DispatchObjectRead(ObjectAddress address)
+ErrorCode DeviceComposition::DispatchObjectRead(ObjectAddress address)
 {
   ObjectEntry* entry = dictionary_.FindEntry(address);
   return entry == nullptr ? ErrorCode::NOT_FOUND : entry->owner->OnObjectRead(*entry);
 }
 
-ErrorCode SlaveComposition::DispatchObjectWrite(ObjectAddress address)
+ErrorCode DeviceComposition::DispatchObjectWrite(ObjectAddress address)
 {
   ObjectEntry* entry = dictionary_.FindEntry(address);
   return entry == nullptr ? ErrorCode::NOT_FOUND : entry->owner->OnObjectWrite(*entry);

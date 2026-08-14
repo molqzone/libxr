@@ -9,7 +9,7 @@
 namespace LibXR::EtherCAT
 {
 
-class SlaveClass;
+class DeviceClass;
 
 struct ObjectAddress
 {
@@ -143,7 +143,7 @@ struct ObjectEntry
   ObjectAccess access = ObjectAccess::NONE;
   const char* name = nullptr;
   RawData storage{};
-  SlaveClass* owner = nullptr;
+  DeviceClass* owner = nullptr;
 };
 
 struct Object
@@ -153,7 +153,7 @@ struct Object
   const char* name = nullptr;
   ObjectEntry* entries = nullptr;
   size_t entry_count = 0;
-  SlaveClass* owner = nullptr;
+  DeviceClass* owner = nullptr;
 };
 
 /** A non-owning view of the completed CoE object dictionary. */
