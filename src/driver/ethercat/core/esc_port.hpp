@@ -11,7 +11,7 @@ namespace LibXR::EtherCAT
  * Normalized events delivered by the board ESC driver.
  *
  * The driver translates controller-specific interrupt status into these
- * protocol events before calling SlaveCore::HandleInterrupt().
+ * protocol events before calling DeviceCore::HandleInterrupt().
  */
 enum class EscEvent : uint32_t
 {

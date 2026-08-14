@@ -1,29 +1,29 @@
 #pragma once
 
 #include "core/object_dictionary.hpp"
-#include "core/slave_state.hpp"
+#include "core/al_state.hpp"
 
 namespace LibXR::EtherCAT
 {
 
-class SlaveBuilder;
-class SlaveComposition;
+class DeviceBuilder;
+class DeviceComposition;
 
 /**
  * One functional contribution to an EtherCAT slave.
  *
- * Classes describe their own CoE objects and PDO mappings. SlaveComposition
- * combines completed classes into one slave before SlaveCore starts handling
+ * Classes describe their own CoE objects and PDO mappings. DeviceComposition
+ * combines completed classes into one device before DeviceCore starts handling
  * protocol events.
  */
-class SlaveClass
+class DeviceClass
 {
  public:
-  virtual ~SlaveClass() = default;
+  virtual ~DeviceClass() = default;
 
  protected:
-  virtual void Describe(SlaveBuilder& builder) = 0;
-  virtual void OnStateChanged(SlaveState from, SlaveState to)
+  virtual void Describe(DeviceBuilder& builder) = 0;
+  virtual void OnStateChanged(AlState from, AlState to)
   {
     (void)from;
     (void)to;
@@ -42,7 +42,7 @@ class SlaveClass
   }
 
  private:
-  friend class SlaveComposition;
+  friend class DeviceComposition;
 };
 
 }  // namespace LibXR::EtherCAT

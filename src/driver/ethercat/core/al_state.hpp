@@ -6,7 +6,7 @@ namespace LibXR::EtherCAT
 {
 
 /** EtherCAT application-layer state. */
-enum class SlaveState : uint8_t
+enum class AlState : uint8_t
 {
   INIT = 0x01,
   PRE_OPERATIONAL = 0x02,

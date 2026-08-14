@@ -27,7 +27,7 @@ struct Pdo
   PdoEntry* entries = nullptr;
   size_t entry_count = 0;
   uint16_t bit_length = 0;
-  SlaveClass* owner = nullptr;
+  DeviceClass* owner = nullptr;
 };
 
 }  // namespace LibXR::EtherCAT
