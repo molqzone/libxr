@@ -186,7 +186,7 @@ inline esc_cfg_t MakeSoesConfiguration(const SlaveClass::Options& options)
 {
   esc_cfg_t soes_config{};
   soes_config.user_arg = CallbackBridge::Active();
-  soes_config.use_interrupt = options.execution_mode == SlaveClass::ExecutionMode::INTERRUPT;
+  soes_config.use_interrupt = 1;
   soes_config.watchdog_cnt = options.watchdog_count;
   soes_config.skip_default_initialization = options.skip_default_initialization;
   soes_config.set_defaults_hook = CallbackBridge::SetDefaults;
@@ -257,43 +257,13 @@ inline ErrorCode SlaveClass::Initialize()
   return ErrorCode::OK;
 }
 
-inline ErrorCode SlaveClass::Poll()
-{
-  if (!initialized_)
-  {
-    return ErrorCode::STATE_ERR;
-  }
-  ecat_slv_poll();
-  return ErrorCode::OK;
-}
-
-inline ErrorCode SlaveClass::Worker(uint32_t event_mask)
+inline ErrorCode SlaveClass::HandleInterrupt(uint32_t event_mask)
 {
   if (!initialized_)
   {
     return ErrorCode::STATE_ERR;
   }
   ecat_slv_worker(event_mask);
-  return ErrorCode::OK;
-}
-
-inline ErrorCode SlaveClass::Process(uint8_t flags)
-{
-  if (!initialized_)
-  {
-    return ErrorCode::STATE_ERR;
-  }
-  DIG_process(flags);
-  return ErrorCode::OK;
-}
-
-inline ErrorCode SlaveClass::Run()
-{
-  if (!initialized_)
-  {
-    return ErrorCode::STATE_ERR;
-  }
-  ecat_slv();
   return ErrorCode::OK;
 }
 

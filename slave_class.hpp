@@ -23,15 +23,8 @@ struct CallbackBridge;
 class SlaveClass
 {
  public:
-  enum class ExecutionMode : uint8_t
-  {
-    POLLING,
-    INTERRUPT,
-  };
-
   struct Options
   {
-    ExecutionMode execution_mode = ExecutionMode::POLLING;
     int watchdog_count = 0;
     bool skip_default_initialization = false;
   };
@@ -62,10 +55,7 @@ class SlaveClass
   virtual ~SlaveClass();
 
   [[nodiscard]] ErrorCode Initialize();
-  [[nodiscard]] ErrorCode Poll();
-  [[nodiscard]] ErrorCode Worker(uint32_t event_mask);
-  [[nodiscard]] ErrorCode Process(uint8_t flags);
-  [[nodiscard]] ErrorCode Run();
+  [[nodiscard]] ErrorCode HandleInterrupt(uint32_t event_mask);
 
   [[nodiscard]] bool IsInitialized() const { return initialized_; }
   [[nodiscard]] Options& GetOptions() { return options_; }
