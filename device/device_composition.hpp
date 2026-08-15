@@ -68,6 +68,9 @@ class DeviceComposition
   void DispatchInputsRequested();
   [[nodiscard]] ErrorCode DispatchObjectRead(ObjectAddress address);
   [[nodiscard]] ErrorCode DispatchObjectWrite(ObjectAddress address);
+  [[nodiscard]] size_t GetPdoByteSize(PdoDirection direction) const;
+  [[nodiscard]] ErrorCode PackPdos(RawData process_data);
+  [[nodiscard]] ErrorCode UnpackPdos(ConstRawData process_data);
 
   DevicePool& pool_;
   ObjectDictionary dictionary_{};
