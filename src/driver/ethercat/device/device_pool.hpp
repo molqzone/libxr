@@ -37,8 +37,10 @@ class DevicePool
     size_t pdo_entry_capacity = 0;
     uint8_t* process_data = nullptr;
     size_t process_data_capacity = 0;
-    uint8_t* mailbox = nullptr;
-    size_t mailbox_capacity = 0;
+    uint8_t* mailbox_request = nullptr;
+    size_t mailbox_request_capacity = 0;
+    uint8_t* mailbox_response = nullptr;
+    size_t mailbox_response_capacity = 0;
   };
 
   explicit DevicePool(const Storage& storage);
@@ -77,18 +79,29 @@ class DevicePool
 namespace Detail
 {
 
-template <size_t ClassCapacity, size_t ObjectCapacity, size_t EntryCapacity,
-          size_t PdoCapacity, size_t PdoEntryCapacity, size_t ProcessDataCapacity,
-          size_t MailboxCapacity>
+template <size_t ClassCapacity, size_t ObjectCapacity, size_t EntryCapacity, size_t PdoCapacity,
+          size_t PdoEntryCapacity, size_t ProcessDataCapacity, size_t MailboxCapacity>
 class StaticDevicePoolStorage
 {
  protected:
   [[nodiscard]] DevicePool::Storage GetStorage()
   {
-    return {classes_.data(), ClassCapacity, objects_.data(), ObjectCapacity,
-            entries_.data(), EntryCapacity, pdos_.data(), PdoCapacity,
-            pdo_entries_.data(), PdoEntryCapacity, process_data_.data(),
-            ProcessDataCapacity, mailbox_.data(), MailboxCapacity};
+    return {classes_.data(),
+            ClassCapacity,
+            objects_.data(),
+            ObjectCapacity,
+            entries_.data(),
+            EntryCapacity,
+            pdos_.data(),
+            PdoCapacity,
+            pdo_entries_.data(),
+            PdoEntryCapacity,
+            process_data_.data(),
+            ProcessDataCapacity,
+            mailbox_request_.data(),
+            MailboxCapacity,
+            mailbox_response_.data(),
+            MailboxCapacity};
   }
 
  private:
@@ -98,7 +111,8 @@ class StaticDevicePoolStorage
   std::array<Pdo, PdoCapacity> pdos_{};
   std::array<PdoEntry, PdoEntryCapacity> pdo_entries_{};
   std::array<uint8_t, ProcessDataCapacity> process_data_{};
-  std::array<uint8_t, MailboxCapacity> mailbox_{};
+  std::array<uint8_t, MailboxCapacity> mailbox_request_{};
+  std::array<uint8_t, MailboxCapacity> mailbox_response_{};
 };
 
 }  // namespace Detail
@@ -109,19 +123,16 @@ class StaticDevicePoolStorage
  * Capacity is declared alongside the application composition and no dynamic
  * allocation is used while the dictionary and PDO mapping are built.
  */
-template <size_t ClassCapacity, size_t ObjectCapacity, size_t EntryCapacity,
-          size_t PdoCapacity, size_t PdoEntryCapacity, size_t ProcessDataCapacity = 128,
-          size_t MailboxCapacity = 128>
+template <size_t ClassCapacity, size_t ObjectCapacity, size_t EntryCapacity, size_t PdoCapacity,
+          size_t PdoEntryCapacity, size_t ProcessDataCapacity = 128, size_t MailboxCapacity = 128>
 class StaticDevicePool final
-    : private Detail::StaticDevicePoolStorage<ClassCapacity, ObjectCapacity, EntryCapacity,
-                                              PdoCapacity, PdoEntryCapacity,
-                                              ProcessDataCapacity, MailboxCapacity>,
+    : private Detail::StaticDevicePoolStorage<ClassCapacity, ObjectCapacity, EntryCapacity, PdoCapacity,
+                                              PdoEntryCapacity, ProcessDataCapacity, MailboxCapacity>,
       public DevicePool
 {
  private:
-  using Storage = Detail::StaticDevicePoolStorage<ClassCapacity, ObjectCapacity, EntryCapacity,
-                                                   PdoCapacity, PdoEntryCapacity,
-                                                   ProcessDataCapacity, MailboxCapacity>;
+  using Storage = Detail::StaticDevicePoolStorage<ClassCapacity, ObjectCapacity, EntryCapacity, PdoCapacity,
+                                                  PdoEntryCapacity, ProcessDataCapacity, MailboxCapacity>;
 
  public:
   static_assert(ClassCapacity > 0);

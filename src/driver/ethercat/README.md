@@ -19,13 +19,15 @@ Public headers are grouped by responsibility:
 `DeviceCore` now implements the IRQ-driven baseline needed by a fixed-PDO device:
 
 - the AL state machine and AL status/error registers;
-- Sync Manager and FMMU validation for SM2/SM3 process data;
+- ESC capability discovery plus Sync Manager/FMMU validation for the configured
+  buffered process-data channels, without assigning protocol meaning to SM numbers;
 - bit-accurate PDO transfer between SM PDRAM and declared object storage;
-- optional SM0/SM1 mailbox transport with CoE SDO expedited and segmented upload/download.
+- optional mailbox-mode request/response pair with CoE SDO expedited and segmented
+  upload/download. Responses are retained for a mailbox retry, not modeled as USB endpoints.
 
-`StaticDevicePool` owns fixed PDRAM and mailbox scratch buffers in addition to
-composition storage. Its final two template parameters control their capacities
-(both default to 128 bytes).
+`StaticDevicePool` owns fixed PDRAM and separate mailbox request/response scratch
+buffers in addition to composition storage. Its final two template parameters control
+the PDRAM and per-direction mailbox capacities (both default to 128 bytes).
 
 The remaining protocol work is dynamic PDO assignment, CoE SDO information
 services, distributed clocks, EEPROM/SII handling, and additional mailbox protocols.
