@@ -63,8 +63,10 @@ class DeviceCore final
 
   struct ProcessDataConfiguration
   {
+    uint8_t output_sync_manager = 0;
     uint16_t output_address = 0;
     size_t output_size = 0;
+    uint8_t input_sync_manager = 0;
     uint16_t input_address = 0;
     size_t input_size = 0;
     bool valid = false;
@@ -72,10 +74,17 @@ class DeviceCore final
 
   struct MailboxConfiguration
   {
-    SyncManager input{};
-    SyncManager output{};
+    uint8_t request_sync_manager = 0;
+    SyncManager request{};
+    uint8_t response_sync_manager = 0;
+    SyncManager response{};
     bool enabled = false;
-    uint8_t counter = 0;
+    uint8_t response_counter = 0;
+    uint8_t last_request_counter = 0;
+    uint8_t last_request_protocol = 0;
+    size_t response_size = 0;
+    bool has_cached_response = false;
+    bool response_pending = false;
   };
 
   enum class SdoTransferDirection : uint8_t
@@ -104,10 +113,11 @@ class DeviceCore final
   [[nodiscard]] ErrorCode ReadEscConfiguration();
   [[nodiscard]] ErrorCode SetSyncManagerEnabled(uint8_t index, bool enabled);
 
+  [[nodiscard]] const SyncManager* FindSyncManager(uint8_t operation_mode, uint8_t direction, uint8_t* index,
+                                                   bool require_nonzero_length = false) const;
   [[nodiscard]] bool ValidateMailboxConfiguration(AlError& error);
   [[nodiscard]] bool ValidateProcessDataConfiguration(AlError& error);
-  [[nodiscard]] const Fmmu* FindFmmu(uint16_t physical_start, size_t length,
-                                      uint8_t required_type) const;
+  [[nodiscard]] const Fmmu* FindFmmu(uint16_t physical_start, size_t length, uint8_t required_type) const;
   [[nodiscard]] bool StartMailbox();
   void StopMailbox();
   [[nodiscard]] bool StartProcessData();
@@ -124,8 +134,9 @@ class DeviceCore final
   void TransferOutputs();
   void TransferInputs();
 
-  void ProcessMailbox();
-  [[nodiscard]] bool SendMailbox(uint8_t protocol, size_t payload_size);
+  void ProcessMailbox(uint32_t sync_manager_events);
+  [[nodiscard]] bool FlushMailboxResponse();
+  [[nodiscard]] bool QueueMailboxResponse(uint8_t protocol, size_t payload_size);
   void SendMailboxError(uint16_t error);
   void ProcessCoe(const uint8_t* payload, size_t payload_size);
   void ProcessSdoUpload(const uint8_t* payload, size_t payload_size);
@@ -142,8 +153,10 @@ class DeviceCore final
   EscPort& port_;
   DevicePool& pool_;
   DeviceComposition composition_;
-  std::array<SyncManager, EscRegister::SYNC_MANAGER_COUNT> sync_managers_{};
-  std::array<Fmmu, EscRegister::FMMU_COUNT> fmmus_{};
+  std::array<SyncManager, EscRegister::MAX_SYNC_MANAGER_COUNT> sync_managers_{};
+  std::array<Fmmu, EscRegister::MAX_FMMU_COUNT> fmmus_{};
+  uint8_t sync_manager_count_ = 0;
+  uint8_t fmmu_count_ = 0;
   ProcessDataConfiguration process_data_{};
   MailboxConfiguration mailbox_{};
   SdoTransfer sdo_transfer_{};

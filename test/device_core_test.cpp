@@ -64,28 +64,34 @@ class IoDevice final : public DeviceClass
   uint8_t output = 0;
   uint8_t input = 0;
   std::array<uint8_t, 8> parameter{};
+  size_t object_write_count = 0;
 
  protected:
   void Describe(DeviceBuilder& builder) override
   {
     Object& output_object = builder.AddObject(0x6000, ObjectCode::VARIABLE, "Output");
-    ObjectEntry& output_entry = builder.AddEntry(
-        output_object, 0, ObjectDataType::UNSIGNED8, 8,
-        ObjectAccess::WRITE | ObjectAccess::RX_PDO, "Output", RawData(output));
+    ObjectEntry& output_entry =
+        builder.AddEntry(output_object, 0, ObjectDataType::UNSIGNED8, 8,
+                         ObjectAccess::WRITE | ObjectAccess::RX_PDO, "Output", RawData(output));
     Pdo& rx = builder.AddPdo(PdoDirection::RX, 0x1600);
     builder.Map(rx, output_entry);
 
     Object& input_object = builder.AddObject(0x6010, ObjectCode::VARIABLE, "Input");
-    ObjectEntry& input_entry = builder.AddEntry(
-        input_object, 0, ObjectDataType::UNSIGNED8, 8,
-        ObjectAccess::READ | ObjectAccess::TX_PDO, "Input", RawData(input));
+    ObjectEntry& input_entry =
+        builder.AddEntry(input_object, 0, ObjectDataType::UNSIGNED8, 8,
+                         ObjectAccess::READ | ObjectAccess::TX_PDO, "Input", RawData(input));
     Pdo& tx = builder.AddPdo(PdoDirection::TX, 0x1A00);
     builder.Map(tx, input_entry);
 
     Object& parameter_object = builder.AddObject(0x2000, ObjectCode::VARIABLE, "Parameter");
-    builder.AddEntry(parameter_object, 0, ObjectDataType::OCTET_STRING, 64,
-                     ObjectAccess::READ_WRITE, "Parameter",
-                     RawData(parameter.data(), parameter.size()));
+    builder.AddEntry(parameter_object, 0, ObjectDataType::OCTET_STRING, 64, ObjectAccess::READ_WRITE,
+                     "Parameter", RawData(parameter.data(), parameter.size()));
+  }
+
+  ErrorCode OnObjectWrite(ObjectEntry&) override
+  {
+    ++object_write_count;
+    return ErrorCode::OK;
   }
 };
 
@@ -96,6 +102,8 @@ int main()
   FakeEsc esc;
   IoDevice application;
   StaticDevicePool<1, 3, 3, 2, 2, 8, 64> pool;
+  esc.memory[0x0004] = 8;
+  esc.memory[0x0005] = 8;
 
   Put16(esc.memory, 0x0800, 0x1000);
   Put16(esc.memory, 0x0802, 0);
@@ -104,12 +112,12 @@ int main()
   Put16(esc.memory, 0x080A, 0);
   esc.memory[0x080C] = 0;
 
-  Put16(esc.memory, 0x0810, 0x1000);
-  Put16(esc.memory, 0x0812, 1);
-  esc.memory[0x0814] = 0x04;
-  Put16(esc.memory, 0x0818, 0x1100);
-  Put16(esc.memory, 0x081A, 1);
-  esc.memory[0x081C] = 0x00;
+  Put16(esc.memory, 0x0820, 0x1000);
+  Put16(esc.memory, 0x0822, 1);
+  esc.memory[0x0824] = 0x04;
+  Put16(esc.memory, 0x0828, 0x1100);
+  Put16(esc.memory, 0x082A, 1);
+  esc.memory[0x082C] = 0x00;
 
   Put32(esc.memory, 0x0600, 0x00000000);
   Put16(esc.memory, 0x0604, 1);
@@ -140,16 +148,20 @@ int main()
   assert(core.GetState() == AlState::OPERATIONAL);
 
   esc.memory[0x1000] = 0xA5;
-  core.HandleInterrupt(EscEvent::PROCESS_DATA_OUTPUT);
+  Put32(esc.memory, 0x0220, EscRegister::SyncManagerEvent(4));
+  core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(application.output == 0xA5);
 
   application.input = 0x5A;
-  core.HandleInterrupt(EscEvent::PROCESS_DATA_INPUT);
+  Put32(esc.memory, 0x0220, EscRegister::SyncManagerEvent(5));
+  core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(esc.memory[0x1100] == 0x5A);
 
   FakeEsc mailbox_esc;
   IoDevice mailbox_application;
   StaticDevicePool<1, 3, 3, 2, 2, 8, 64> mailbox_pool;
+  mailbox_esc.memory[0x0004] = 8;
+  mailbox_esc.memory[0x0005] = 8;
   Put16(mailbox_esc.memory, 0x0800, 0x1000);
   Put16(mailbox_esc.memory, 0x0802, 64);
   mailbox_esc.memory[0x0804] = 0x26;
@@ -163,34 +175,50 @@ int main()
   assert(mailbox_core.GetState() == AlState::PRE_OPERATIONAL);
 
   Put16(mailbox_esc.memory, 0x1000, 6);
-  mailbox_esc.memory[0x1005] = 0x03;
+  mailbox_esc.memory[0x1005] = 0x13;
   Put16(mailbox_esc.memory, 0x1006, 0x2000);
   mailbox_esc.memory[0x1008] = 0x40;
   Put16(mailbox_esc.memory, 0x1009, 0x6010);
   mailbox_esc.memory[0x100B] = 0;
   mailbox_application.input = 0x31;
+  mailbox_esc.memory[0x080D] = EscRegister::SYNC_MANAGER_STATUS_MAILBOX;
   Put32(mailbox_esc.memory, 0x0220, 1U << 8U);
-  mailbox_core.HandleInterrupt(EscEvent::MAILBOX);
+  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  assert(mailbox_esc.memory[0x1040] == 0);
+
+  mailbox_esc.memory[0x080D] = 0;
+  Put32(mailbox_esc.memory, 0x0220, EscRegister::SyncManagerEvent(1));
+  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(mailbox_esc.memory[0x1040] == 10);
   assert(mailbox_esc.memory[0x1048] == 0x4F);
   assert(mailbox_esc.memory[0x104C] == 0x31);
 
   Put16(mailbox_esc.memory, 0x1000, 10);
-  mailbox_esc.memory[0x1005] = 0x03;
+  mailbox_esc.memory[0x1005] = 0x23;
   Put16(mailbox_esc.memory, 0x1006, 0x2000);
   mailbox_esc.memory[0x1008] = 0x2F;
   Put16(mailbox_esc.memory, 0x1009, 0x6000);
   mailbox_esc.memory[0x100B] = 0;
   mailbox_esc.memory[0x100C] = 0x77;
   Put32(mailbox_esc.memory, 0x0220, 1U << 8U);
-  mailbox_core.HandleInterrupt(EscEvent::MAILBOX);
+  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(mailbox_application.output == 0x77);
+  assert(mailbox_application.object_write_count == 1);
+  assert(mailbox_esc.memory[0x1040] == 6);
+  assert(mailbox_esc.memory[0x1048] == 0x60);
+
+  mailbox_esc.memory[0x1040] = 0;
+  Put32(mailbox_esc.memory, 0x0220, EscRegister::SyncManagerEvent(0));
+  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  assert(mailbox_application.object_write_count == 1);
   assert(mailbox_esc.memory[0x1040] == 6);
   assert(mailbox_esc.memory[0x1048] == 0x60);
 
   FakeEsc segmented_esc;
   IoDevice segmented_application;
   StaticDevicePool<1, 3, 3, 2, 2, 8, 16> segmented_pool;
+  segmented_esc.memory[0x0004] = 8;
+  segmented_esc.memory[0x0005] = 8;
   Put16(segmented_esc.memory, 0x0800, 0x1000);
   Put16(segmented_esc.memory, 0x0802, 16);
   segmented_esc.memory[0x0804] = 0x26;
@@ -207,48 +235,49 @@ int main()
   segmented_core.HandleInterrupt(EscEvent::AL_CONTROL);
 
   Put16(segmented_esc.memory, 0x1000, 6);
-  segmented_esc.memory[0x1005] = 0x03;
+  segmented_esc.memory[0x1005] = 0x13;
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x40;
   Put16(segmented_esc.memory, 0x1009, 0x2000);
   segmented_esc.memory[0x100B] = 0;
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::MAILBOX);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(segmented_esc.memory[0x1048] == 0x41);
 
   Put16(segmented_esc.memory, 0x1000, 3);
-  segmented_esc.memory[0x1005] = 0x03;
+  segmented_esc.memory[0x1005] = 0x23;
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x60;
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::MAILBOX);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(segmented_esc.memory[0x1048] == 0x00);
   assert(segmented_esc.memory[0x1049] == 1);
   assert(segmented_esc.memory[0x104F] == 7);
 
   Put16(segmented_esc.memory, 0x1000, 3);
-  segmented_esc.memory[0x1005] = 0x03;
+  segmented_esc.memory[0x1005] = 0x33;
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x70;
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::MAILBOX);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(segmented_esc.memory[0x1048] == 0x1D);
   assert(segmented_esc.memory[0x1049] == 8);
+  assert(segmented_esc.memory[0x1040] == 4);
 
   segmented_application.parameter.fill(0);
   Put16(segmented_esc.memory, 0x1000, 10);
-  segmented_esc.memory[0x1005] = 0x03;
+  segmented_esc.memory[0x1005] = 0x43;
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x21;
   Put16(segmented_esc.memory, 0x1009, 0x2000);
   segmented_esc.memory[0x100B] = 0;
   Put32(segmented_esc.memory, 0x100C, 8);
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::MAILBOX);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(segmented_esc.memory[0x1048] == 0x60);
 
   Put16(segmented_esc.memory, 0x1000, 10);
-  segmented_esc.memory[0x1005] = 0x03;
+  segmented_esc.memory[0x1005] = 0x53;
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x00;
   for (uint8_t index = 0; index < 7; ++index)
@@ -256,16 +285,16 @@ int main()
     segmented_esc.memory[0x1009 + index] = static_cast<uint8_t>(index + 1U);
   }
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::MAILBOX);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(segmented_esc.memory[0x1048] == 0x20);
 
   Put16(segmented_esc.memory, 0x1000, 10);
-  segmented_esc.memory[0x1005] = 0x03;
+  segmented_esc.memory[0x1005] = 0x63;
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x1D;
   segmented_esc.memory[0x1009] = 8;
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::MAILBOX);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
   assert(segmented_esc.memory[0x1048] == 0x30);
   for (uint8_t index = 0; index < segmented_application.parameter.size(); ++index)
   {
