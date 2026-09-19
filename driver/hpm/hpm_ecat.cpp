@@ -80,7 +80,7 @@ void HPMECATDevice::OnPdiInterrupt()
 {
   if (instance_ != nullptr)
   {
-    instance_->core_.HandleInterrupt(instance_->ReadPdiEvents());
+    instance_->core_.HandleInterrupt(instance_->ReadPdiEvents(), true);
   }
 }
 
@@ -92,7 +92,7 @@ void HPMECATDevice::OnSync0Interrupt()
   }
 
   [[maybe_unused]] volatile uint8_t acknowledgement = instance_->esc_.SYNC0_STAT;
-  instance_->core_.HandleInterrupt(EtherCAT::EscEvent::SYNC0);
+  instance_->core_.HandleInterrupt(EtherCAT::EscEvent::SYNC0, true);
 }
 
 void HPMECATDevice::OnSync1Interrupt()
@@ -103,7 +103,7 @@ void HPMECATDevice::OnSync1Interrupt()
   }
 
   [[maybe_unused]] volatile uint8_t acknowledgement = instance_->esc_.SYNC1_STAT;
-  instance_->core_.HandleInterrupt(EtherCAT::EscEvent::SYNC1);
+  instance_->core_.HandleInterrupt(EtherCAT::EscEvent::SYNC1, true);
 }
 
 EtherCAT::EscEvent HPMECATDevice::ReadPdiEvents() const

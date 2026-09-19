@@ -167,40 +167,42 @@ const Pdo* DeviceComposition::FindPdo(PdoDirection direction, uint16_t index) co
   return nullptr;
 }
 
-void DeviceComposition::DispatchStateChanged(AlState from, AlState to)
+void DeviceComposition::DispatchStateChanged(bool in_isr, AlState from, AlState to)
 {
   for (size_t class_index = 0; class_index < pool_.class_count_; ++class_index)
   {
-    pool_.storage_.classes[class_index]->OnStateChanged(from, to);
+    pool_.storage_.classes[class_index]->OnStateChanged(in_isr, from, to);
   }
 }
 
-void DeviceComposition::DispatchOutputsUpdated()
+void DeviceComposition::DispatchOutputsUpdated(bool in_isr)
 {
   for (size_t class_index = 0; class_index < pool_.class_count_; ++class_index)
   {
-    pool_.storage_.classes[class_index]->OnOutputsUpdated();
+    pool_.storage_.classes[class_index]->OnOutputsUpdated(in_isr);
   }
 }
 
-void DeviceComposition::DispatchInputsRequested()
+void DeviceComposition::DispatchInputsRequested(bool in_isr)
 {
   for (size_t class_index = 0; class_index < pool_.class_count_; ++class_index)
   {
-    pool_.storage_.classes[class_index]->OnInputsRequested();
+    pool_.storage_.classes[class_index]->OnInputsRequested(in_isr);
   }
 }
 
-ErrorCode DeviceComposition::DispatchObjectRead(ObjectAddress address)
+ErrorCode DeviceComposition::DispatchObjectRead(bool in_isr, ObjectAddress address)
 {
   ObjectEntry* entry = dictionary_.FindEntry(address);
-  return entry == nullptr ? ErrorCode::NOT_FOUND : entry->owner->OnObjectRead(*entry);
+  return entry == nullptr ? ErrorCode::NOT_FOUND
+                          : entry->owner->OnObjectRead(in_isr, *entry);
 }
 
-ErrorCode DeviceComposition::DispatchObjectWrite(ObjectAddress address)
+ErrorCode DeviceComposition::DispatchObjectWrite(bool in_isr, ObjectAddress address)
 {
   ObjectEntry* entry = dictionary_.FindEntry(address);
-  return entry == nullptr ? ErrorCode::NOT_FOUND : entry->owner->OnObjectWrite(*entry);
+  return entry == nullptr ? ErrorCode::NOT_FOUND
+                          : entry->owner->OnObjectWrite(in_isr, *entry);
 }
 
 size_t DeviceComposition::GetPdoByteSize(PdoDirection direction) const
@@ -217,7 +219,7 @@ size_t DeviceComposition::GetPdoByteSize(PdoDirection direction) const
   return BytesForBits(bit_count);
 }
 
-ErrorCode DeviceComposition::PackPdos(RawData process_data)
+ErrorCode DeviceComposition::PackPdos(bool in_isr, RawData process_data)
 {
   const size_t process_data_size = GetPdoByteSize(PdoDirection::TX);
   if (process_data.addr_ == nullptr && process_data_size != 0U)
@@ -253,7 +255,7 @@ ErrorCode DeviceComposition::PackPdos(RawData process_data)
         return ErrorCode::PTR_NULL;
       }
 
-      const ErrorCode result = DispatchObjectRead(entry.address);
+      const ErrorCode result = DispatchObjectRead(in_isr, entry.address);
       if (result != ErrorCode::OK)
       {
         return result;
@@ -267,7 +269,7 @@ ErrorCode DeviceComposition::PackPdos(RawData process_data)
   return ErrorCode::OK;
 }
 
-ErrorCode DeviceComposition::UnpackPdos(ConstRawData process_data)
+ErrorCode DeviceComposition::UnpackPdos(bool in_isr, ConstRawData process_data)
 {
   const size_t process_data_size = GetPdoByteSize(PdoDirection::RX);
   if (process_data.addr_ == nullptr && process_data_size != 0U)
@@ -300,7 +302,7 @@ ErrorCode DeviceComposition::UnpackPdos(ConstRawData process_data)
 
       CopyBitsFromProcessData(static_cast<uint8_t*>(entry.storage.addr_), bytes,
                               pdo_bit_offset + pdo_entry.bit_offset, entry.bit_length);
-      const ErrorCode result = DispatchObjectWrite(entry.address);
+      const ErrorCode result = DispatchObjectWrite(in_isr, entry.address);
       if (result != ErrorCode::OK)
       {
         return result;

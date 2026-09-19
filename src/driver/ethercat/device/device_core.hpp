@@ -33,7 +33,7 @@ class DeviceCore final
   DeviceCore& operator=(DeviceCore&&) = delete;
 
   /** Enter the protocol core from the board driver's ESC IRQ path. */
-  void HandleInterrupt(EscEvent events);
+  void HandleInterrupt(EscEvent events, bool in_isr);
 
   /**
    * Hand one AL Event Request snapshot to the core.
@@ -42,8 +42,9 @@ class DeviceCore final
    * bits to EscEvent lives here rather than in each driver.
    *
    * @param raw_alevent value read from 0x0220 (not an EscEvent).
+   * @param in_isr      whether the driver is calling from an interrupt.
    */
-  void HandleAlevent(uint16_t raw_alevent);
+  void HandleAlevent(uint16_t raw_alevent, bool in_isr);
 
   /** AL Event Request bits to normalized events. */
   [[nodiscard]] static EscEvent TranslateAlevent(uint16_t raw_alevent);
@@ -171,6 +172,12 @@ class DeviceCore final
   [[nodiscard]] bool IsObjectWritable(const ObjectEntry& entry) const;
   [[nodiscard]] size_t ObjectSize(const ObjectEntry& entry) const;
   void ResetSdoTransfer();
+
+  // Context of the entry being processed. DeviceCore is entered from one
+  // context at a time, so the class dispatch reads this instead of threading
+  // the flag through every private helper. The DeviceClass hooks themselves
+  // still receive it explicitly.
+  bool in_isr_ = false;
 
   EscPort& port_;
   DevicePool& pool_;

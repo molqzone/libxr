@@ -65,14 +65,14 @@ class DeviceComposition
  private:
   friend class DeviceCore;
 
-  void DispatchStateChanged(AlState from, AlState to);
-  void DispatchOutputsUpdated();
-  void DispatchInputsRequested();
-  [[nodiscard]] ErrorCode DispatchObjectRead(ObjectAddress address);
-  [[nodiscard]] ErrorCode DispatchObjectWrite(ObjectAddress address);
+  void DispatchStateChanged(bool in_isr, AlState from, AlState to);
+  void DispatchOutputsUpdated(bool in_isr);
+  void DispatchInputsRequested(bool in_isr);
+  [[nodiscard]] ErrorCode DispatchObjectRead(bool in_isr, ObjectAddress address);
+  [[nodiscard]] ErrorCode DispatchObjectWrite(bool in_isr, ObjectAddress address);
   [[nodiscard]] size_t GetPdoByteSize(PdoDirection direction) const;
-  [[nodiscard]] ErrorCode PackPdos(RawData process_data);
-  [[nodiscard]] ErrorCode UnpackPdos(ConstRawData process_data);
+  [[nodiscard]] ErrorCode PackPdos(bool in_isr, RawData process_data);
+  [[nodiscard]] ErrorCode UnpackPdos(bool in_isr, ConstRawData process_data);
 
   DevicePool& pool_;
   ObjectDictionary dictionary_{};

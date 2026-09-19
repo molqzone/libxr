@@ -76,14 +76,14 @@ ErrorCode DeviceCore::SetAleventMask(uint16_t mask)
                      ConstRawData(bytes, sizeof(bytes)));
 }
 
-void DeviceCore::HandleAlevent(uint16_t raw_alevent)
+void DeviceCore::HandleAlevent(uint16_t raw_alevent, bool in_isr)
 {
   const EscEvent events = TranslateAlevent(raw_alevent);
   if (events != EscEvent::NONE)
   {
     // ProcessSyncManagerEvents() re-reads 0x0220 to learn which SM fired, so
     // this path must not clear the register for it.
-    HandleInterrupt(events);
+    HandleInterrupt(events, in_isr);
   }
 }
 
@@ -121,8 +121,10 @@ EscEvent DeviceCore::TranslateAlevent(uint16_t raw_alevent)
   return events;
 }
 
-void DeviceCore::HandleInterrupt(EscEvent events)
+void DeviceCore::HandleInterrupt(EscEvent events, bool in_isr)
 {
+  in_isr_ = in_isr;
+
   if (HasEvent(events, EscEvent::AL_CONTROL))
   {
     ProcessAlControl();
@@ -614,7 +616,7 @@ void DeviceCore::CommitState(AlState next_state)
   {
     const AlState previous_state = state_;
     state_ = next_state;
-    composition_.DispatchStateChanged(previous_state, next_state);
+    composition_.DispatchStateChanged(in_isr_, previous_state, next_state);
   }
   PublishAlStatus();
 }
@@ -639,7 +641,7 @@ void DeviceCore::Fail(AlState fallback_state, AlError error)
   {
     const AlState previous_state = state_;
     state_ = fallback_state;
-    composition_.DispatchStateChanged(previous_state, fallback_state);
+    composition_.DispatchStateChanged(in_isr_, previous_state, fallback_state);
   }
   al_error_ = error;
   ResetSdoTransfer();
@@ -697,12 +699,12 @@ void DeviceCore::TransferOutputs()
 
   uint8_t* buffer = pool_.storage_.process_data;
   if (ReadEsc(process_data_.output_address, buffer, process_data_.output_size) != ErrorCode::OK ||
-      composition_.UnpackPdos(ConstRawData(buffer, process_data_.output_size)) != ErrorCode::OK)
+      composition_.UnpackPdos(in_isr_, ConstRawData(buffer, process_data_.output_size)) != ErrorCode::OK)
   {
     Fail(AlState::SAFE_OPERATIONAL, AlError::NO_VALID_OUTPUTS);
     return;
   }
-  composition_.DispatchOutputsUpdated();
+  composition_.DispatchOutputsUpdated(in_isr_);
 }
 
 void DeviceCore::TransferInputs()
@@ -713,9 +715,9 @@ void DeviceCore::TransferInputs()
     return;
   }
 
-  composition_.DispatchInputsRequested();
+  composition_.DispatchInputsRequested(in_isr_);
   uint8_t* buffer = pool_.storage_.process_data;
-  if (composition_.PackPdos(RawData(buffer, process_data_.input_size)) != ErrorCode::OK ||
+  if (composition_.PackPdos(in_isr_, RawData(buffer, process_data_.input_size)) != ErrorCode::OK ||
       WriteEsc(process_data_.input_address, buffer, process_data_.input_size) != ErrorCode::OK)
   {
     Fail(AlState::PRE_OPERATIONAL, AlError::NO_VALID_INPUTS);
@@ -926,7 +928,7 @@ void DeviceCore::ProcessSdoUpload(const uint8_t* payload, size_t payload_size)
   }
   const size_t size = ObjectSize(*entry);
   if (entry->storage.addr_ == nullptr || entry->storage.size_ < size ||
-      composition_.DispatchObjectRead(entry->address) != ErrorCode::OK)
+      composition_.DispatchObjectRead(in_isr_, entry->address) != ErrorCode::OK)
   {
     SendSdoAbort(index, subindex, SDO_ABORT_GENERAL);
     return;
@@ -1017,7 +1019,7 @@ void DeviceCore::ProcessSdoDownload(const uint8_t* payload, size_t payload_size)
       return;
     }
     std::memcpy(entry->storage.addr_, payload + 6U, size);
-    if (composition_.DispatchObjectWrite(entry->address) != ErrorCode::OK)
+    if (composition_.DispatchObjectWrite(in_isr_, entry->address) != ErrorCode::OK)
     {
       SendSdoAbort(index, subindex, SDO_ABORT_GENERAL);
       return;
@@ -1130,7 +1132,7 @@ void DeviceCore::ProcessSdoDownloadSegment(const uint8_t* payload, size_t payloa
   WriteLe16(response, static_cast<uint16_t>(COE_SDO_RESPONSE << 12U));
   response[2] = static_cast<uint8_t>(SDO_DOWNLOAD_SEGMENT_RESPONSE | (toggle ? SDO_TOGGLE : 0U));
 
-  if (last && composition_.DispatchObjectWrite(sdo_transfer_.entry->address) != ErrorCode::OK)
+  if (last && composition_.DispatchObjectWrite(in_isr_, sdo_transfer_.entry->address) != ErrorCode::OK)
   {
     SendSdoAbort(sdo_transfer_.entry->address.index, sdo_transfer_.entry->address.subindex,
                  SDO_ABORT_GENERAL);

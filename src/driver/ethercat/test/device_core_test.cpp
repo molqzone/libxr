@@ -88,7 +88,7 @@ class IoDevice final : public DeviceClass
                      "Parameter", RawData(parameter.data(), parameter.size()));
   }
 
-  ErrorCode OnObjectWrite(ObjectEntry&) override
+  ErrorCode OnObjectWrite(bool in_isr, ObjectEntry&) override
   {
     ++object_write_count;
     return ErrorCode::OK;
@@ -136,25 +136,25 @@ int main()
   DeviceCore core(esc, pool, {&application});
 
   Put16(esc.memory, 0x0120, static_cast<uint16_t>(AlState::PRE_OPERATIONAL));
-  core.HandleInterrupt(EscEvent::AL_CONTROL);
+  core.HandleInterrupt(EscEvent::AL_CONTROL, false);
   assert(core.GetState() == AlState::PRE_OPERATIONAL);
 
   Put16(esc.memory, 0x0120, static_cast<uint16_t>(AlState::SAFE_OPERATIONAL));
-  core.HandleInterrupt(EscEvent::AL_CONTROL | EscEvent::SYNC_MANAGER_CHANGE);
+  core.HandleInterrupt(EscEvent::AL_CONTROL | EscEvent::SYNC_MANAGER_CHANGE, false);
   assert(core.GetState() == AlState::SAFE_OPERATIONAL);
 
   Put16(esc.memory, 0x0120, static_cast<uint16_t>(AlState::OPERATIONAL));
-  core.HandleInterrupt(EscEvent::AL_CONTROL);
+  core.HandleInterrupt(EscEvent::AL_CONTROL, false);
   assert(core.GetState() == AlState::OPERATIONAL);
 
   esc.memory[0x1000] = 0xA5;
   Put32(esc.memory, 0x0220, EscRegister::SyncManagerEvent(4));
-  core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(application.output == 0xA5);
 
   application.input = 0x5A;
   Put32(esc.memory, 0x0220, EscRegister::SyncManagerEvent(5));
-  core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(esc.memory[0x1100] == 0x5A);
 
   FakeEsc mailbox_esc;
@@ -171,7 +171,7 @@ int main()
 
   DeviceCore mailbox_core(mailbox_esc, mailbox_pool, {&mailbox_application});
   Put16(mailbox_esc.memory, 0x0120, static_cast<uint16_t>(AlState::PRE_OPERATIONAL));
-  mailbox_core.HandleInterrupt(EscEvent::AL_CONTROL);
+  mailbox_core.HandleInterrupt(EscEvent::AL_CONTROL, false);
   assert(mailbox_core.GetState() == AlState::PRE_OPERATIONAL);
 
   Put16(mailbox_esc.memory, 0x1000, 6);
@@ -183,12 +183,12 @@ int main()
   mailbox_application.input = 0x31;
   mailbox_esc.memory[0x080D] = EscRegister::SYNC_MANAGER_STATUS_MAILBOX;
   Put32(mailbox_esc.memory, 0x0220, 1U << 8U);
-  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(mailbox_esc.memory[0x1040] == 0);
 
   mailbox_esc.memory[0x080D] = 0;
   Put32(mailbox_esc.memory, 0x0220, EscRegister::SyncManagerEvent(1));
-  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(mailbox_esc.memory[0x1040] == 10);
   assert(mailbox_esc.memory[0x1048] == 0x4F);
   assert(mailbox_esc.memory[0x104C] == 0x31);
@@ -201,7 +201,7 @@ int main()
   mailbox_esc.memory[0x100B] = 0;
   mailbox_esc.memory[0x100C] = 0x77;
   Put32(mailbox_esc.memory, 0x0220, 1U << 8U);
-  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(mailbox_application.output == 0x77);
   assert(mailbox_application.object_write_count == 1);
   assert(mailbox_esc.memory[0x1040] == 6);
@@ -209,7 +209,7 @@ int main()
 
   mailbox_esc.memory[0x1040] = 0;
   Put32(mailbox_esc.memory, 0x0220, EscRegister::SyncManagerEvent(0));
-  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  mailbox_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(mailbox_application.object_write_count == 1);
   assert(mailbox_esc.memory[0x1040] == 6);
   assert(mailbox_esc.memory[0x1048] == 0x60);
@@ -232,7 +232,7 @@ int main()
   }
   DeviceCore segmented_core(segmented_esc, segmented_pool, {&segmented_application});
   Put16(segmented_esc.memory, 0x0120, static_cast<uint16_t>(AlState::PRE_OPERATIONAL));
-  segmented_core.HandleInterrupt(EscEvent::AL_CONTROL);
+  segmented_core.HandleInterrupt(EscEvent::AL_CONTROL, false);
 
   Put16(segmented_esc.memory, 0x1000, 6);
   segmented_esc.memory[0x1005] = 0x13;
@@ -241,7 +241,7 @@ int main()
   Put16(segmented_esc.memory, 0x1009, 0x2000);
   segmented_esc.memory[0x100B] = 0;
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(segmented_esc.memory[0x1048] == 0x41);
 
   Put16(segmented_esc.memory, 0x1000, 3);
@@ -249,7 +249,7 @@ int main()
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x60;
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(segmented_esc.memory[0x1048] == 0x00);
   assert(segmented_esc.memory[0x1049] == 1);
   assert(segmented_esc.memory[0x104F] == 7);
@@ -259,7 +259,7 @@ int main()
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x70;
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(segmented_esc.memory[0x1048] == 0x1D);
   assert(segmented_esc.memory[0x1049] == 8);
   assert(segmented_esc.memory[0x1040] == 4);
@@ -273,7 +273,7 @@ int main()
   segmented_esc.memory[0x100B] = 0;
   Put32(segmented_esc.memory, 0x100C, 8);
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(segmented_esc.memory[0x1048] == 0x60);
 
   Put16(segmented_esc.memory, 0x1000, 10);
@@ -285,7 +285,7 @@ int main()
     segmented_esc.memory[0x1009 + index] = static_cast<uint8_t>(index + 1U);
   }
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(segmented_esc.memory[0x1048] == 0x20);
 
   Put16(segmented_esc.memory, 0x1000, 10);
@@ -294,7 +294,7 @@ int main()
   segmented_esc.memory[0x1008] = 0x1D;
   segmented_esc.memory[0x1009] = 8;
   Put32(segmented_esc.memory, 0x0220, 1U << 8U);
-  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER);
+  segmented_core.HandleInterrupt(EscEvent::SYNC_MANAGER, false);
   assert(segmented_esc.memory[0x1048] == 0x30);
   for (uint8_t index = 0; index < segmented_application.parameter.size(); ++index)
   {
