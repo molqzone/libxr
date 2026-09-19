@@ -68,6 +68,59 @@ DeviceCore::DeviceCore(EscPort& port, DevicePool& pool,
 {
 }
 
+ErrorCode DeviceCore::SetAleventMask(uint16_t mask)
+{
+  const uint8_t bytes[2] = {static_cast<uint8_t>(mask & 0xFFU),
+                            static_cast<uint8_t>(mask >> 8U)};
+  return port_.Write(EscRegister::AL_EVENT_MASK,
+                     ConstRawData(bytes, sizeof(bytes)));
+}
+
+void DeviceCore::HandleAlevent(uint16_t raw_alevent)
+{
+  const EscEvent events = TranslateAlevent(raw_alevent);
+  if (events != EscEvent::NONE)
+  {
+    // ProcessSyncManagerEvents() re-reads 0x0220 to learn which SM fired, so
+    // this path must not clear the register for it.
+    HandleInterrupt(events);
+  }
+}
+
+EscEvent DeviceCore::TranslateAlevent(uint16_t raw_alevent)
+{
+  EscEvent events = EscEvent::NONE;
+
+  if ((raw_alevent & EscRegister::EVENT_AL_CONTROL) != 0U)
+  {
+    events = events | EscEvent::AL_CONTROL;
+  }
+  if ((raw_alevent & EscRegister::EVENT_SYNC_MANAGER_CHANGE) != 0U)
+  {
+    events = events | EscEvent::SYNC_MANAGER_CHANGE;
+  }
+  if ((raw_alevent & EscRegister::EVENT_EEPROM) != 0U)
+  {
+    events = events | EscEvent::EEPROM;
+  }
+  if ((raw_alevent & EscRegister::EVENT_WATCHDOG) != 0U)
+  {
+    events = events | EscEvent::WATCHDOG;
+  }
+  if ((raw_alevent & EscRegister::EVENT_SYNC_MANAGER_MASK) != 0U)
+  {
+    events = events | EscEvent::SYNC_MANAGER;
+  }
+  if ((raw_alevent & (EscRegister::EVENT_DC_LATCH |
+                      EscRegister::EVENT_DC_SYNC0 |
+                      EscRegister::EVENT_DC_SYNC1)) != 0U)
+  {
+    events = events | EscEvent::SYNC0;
+  }
+
+  return events;
+}
+
 void DeviceCore::HandleInterrupt(EscEvent events)
 {
   if (HasEvent(events, EscEvent::AL_CONTROL))

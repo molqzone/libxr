@@ -35,6 +35,26 @@ class DeviceCore final
   /** Enter the protocol core from the board driver's ESC IRQ path. */
   void HandleInterrupt(EscEvent events);
 
+  /**
+   * Hand one AL Event Request snapshot to the core.
+   *
+   * Every board driver reads the same register, so the translation from raw
+   * bits to EscEvent lives here rather than in each driver.
+   *
+   * @param raw_alevent value read from 0x0220 (not an EscEvent).
+   */
+  void HandleAlevent(uint16_t raw_alevent);
+
+  /** AL Event Request bits to normalized events. */
+  [[nodiscard]] static EscEvent TranslateAlevent(uint16_t raw_alevent);
+
+  /**
+   * Let the PDI interrupt report only the events this device handles, by
+   * writing the AL Event Mask (0x0204). A driver that configures the mask
+   * through its own ESC interface can skip this.
+   */
+  ErrorCode SetAleventMask(uint16_t mask);
+
   [[nodiscard]] AlState GetState() const { return state_; }
   [[nodiscard]] AlError GetAlError() const { return al_error_; }
   [[nodiscard]] bool HasAlError() const { return al_error_ != AlError::NONE; }

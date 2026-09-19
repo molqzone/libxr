@@ -8,6 +8,7 @@ namespace LibXR::EtherCAT::EscRegister
 inline constexpr uint16_t AL_CONTROL = 0x0120U;
 inline constexpr uint16_t AL_STATUS = 0x0130U;
 inline constexpr uint16_t AL_STATUS_CODE = 0x0134U;
+inline constexpr uint16_t AL_EVENT_MASK = 0x0204U;
 inline constexpr uint16_t AL_EVENT_REQUEST = 0x0220U;
 inline constexpr uint16_t FMMU_COUNT = 0x0004U;
 inline constexpr uint16_t SYNC_MANAGER_COUNT = 0x0005U;
@@ -19,8 +20,17 @@ inline constexpr uint16_t FMMU_SIZE = 16U;
 inline constexpr uint8_t MAX_SYNC_MANAGER_COUNT = 8U;
 inline constexpr uint8_t MAX_FMMU_COUNT = 16U;
 
+// AL Event Request (0x0220) bit positions. Every board driver reads the same
+// register, so the translation to EscEvent lives in one place for both
+// memory-mapped and bus-attached ESCs.
 inline constexpr uint32_t EVENT_AL_CONTROL = 1U << 0U;
+inline constexpr uint32_t EVENT_DC_LATCH = 1U << 1U;
+inline constexpr uint32_t EVENT_DC_SYNC0 = 1U << 2U;
+inline constexpr uint32_t EVENT_DC_SYNC1 = 1U << 3U;
 inline constexpr uint32_t EVENT_SYNC_MANAGER_CHANGE = 1U << 4U;
+inline constexpr uint32_t EVENT_EEPROM = 1U << 5U;
+inline constexpr uint32_t EVENT_WATCHDOG = 1U << 6U;
+inline constexpr uint32_t EVENT_SYNC_MANAGER_MASK = 0xFF00U;
 constexpr uint32_t SyncManagerEvent(uint8_t index) { return index < 16U ? (1U << (8U + index)) : 0U; }
 
 inline constexpr uint8_t SYNC_MANAGER_ENABLE = 0x01U;
