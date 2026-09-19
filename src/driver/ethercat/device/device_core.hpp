@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <span>
 
 #include "core/esc_port.hpp"
 #include "core/esc_registers.hpp"
@@ -23,6 +24,7 @@ namespace LibXR::EtherCAT
 class DeviceCore final
 {
  public:
+  DeviceCore(EscPort& port, DevicePool& pool, std::span<DeviceClass* const> classes);
   DeviceCore(EscPort& port, DevicePool& pool, std::initializer_list<DeviceClass*> classes);
 
   DeviceCore(const DeviceCore&) = delete;

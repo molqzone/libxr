@@ -54,10 +54,18 @@ bool IsState(AlState value, AlState expected) { return value == expected; }
 
 }  // namespace
 
-DeviceCore::DeviceCore(EscPort& port, DevicePool& pool, std::initializer_list<DeviceClass*> classes)
+DeviceCore::DeviceCore(EscPort& port, DevicePool& pool,
+                       std::span<DeviceClass* const> classes)
     : port_(port), pool_(pool), composition_(pool, classes)
 {
   PublishAlStatus();
+}
+
+DeviceCore::DeviceCore(EscPort& port, DevicePool& pool,
+                       std::initializer_list<DeviceClass*> classes)
+    : DeviceCore(port, pool,
+                 std::span<DeviceClass* const>(classes.begin(), classes.size()))
+{
 }
 
 void DeviceCore::HandleInterrupt(EscEvent events)

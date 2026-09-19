@@ -1,6 +1,7 @@
 #pragma once
 
 #include <initializer_list>
+#include <span>
 
 #include "device_class.hpp"
 #include "device_pool.hpp"
@@ -50,6 +51,7 @@ class DeviceBuilder
 class DeviceComposition
 {
  public:
+  DeviceComposition(DevicePool& pool, std::span<DeviceClass* const> classes);
   DeviceComposition(DevicePool& pool, std::initializer_list<DeviceClass*> classes);
 
   DeviceComposition(const DeviceComposition&) = delete;

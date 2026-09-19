@@ -126,7 +126,7 @@ PdoEntry& DeviceBuilder::Map(Pdo& pdo, ObjectEntry& entry)
 }
 
 DeviceComposition::DeviceComposition(DevicePool& pool,
-                                   std::initializer_list<DeviceClass*> classes)
+                                   std::span<DeviceClass* const> classes)
     : pool_(pool)
 {
   ASSERT(pool_.Empty());
@@ -145,6 +145,13 @@ DeviceComposition::DeviceComposition(DevicePool& pool,
   }
 
   dictionary_ = ObjectDictionary(pool_.storage_.objects, pool_.object_count_);
+}
+
+DeviceComposition::DeviceComposition(DevicePool& pool,
+                                     std::initializer_list<DeviceClass*> classes)
+    : DeviceComposition(
+          pool, std::span<DeviceClass* const>(classes.begin(), classes.size()))
+{
 }
 
 const Pdo* DeviceComposition::FindPdo(PdoDirection direction, uint16_t index) const
