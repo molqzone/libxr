@@ -80,7 +80,10 @@ void HPMECATDevice::OnPdiInterrupt()
 {
   if (instance_ != nullptr)
   {
-    instance_->core_.HandleInterrupt(instance_->ReadPdiEvents(), true);
+    // 0x0220 is read-clear: this is the only read of it, the core takes the
+    // value and never reads the register itself.
+    instance_->core_.HandleAlevent(
+        static_cast<uint32_t>(instance_->esc_.AL_EVT_REQ), true);
   }
 }
 
@@ -92,7 +95,7 @@ void HPMECATDevice::OnSync0Interrupt()
   }
 
   [[maybe_unused]] volatile uint8_t acknowledgement = instance_->esc_.SYNC0_STAT;
-  instance_->core_.HandleInterrupt(EtherCAT::EscEvent::SYNC0, true);
+  instance_->core_.HandleEvent(EtherCAT::EscEvent::SYNC0, true);
 }
 
 void HPMECATDevice::OnSync1Interrupt()
@@ -103,48 +106,9 @@ void HPMECATDevice::OnSync1Interrupt()
   }
 
   [[maybe_unused]] volatile uint8_t acknowledgement = instance_->esc_.SYNC1_STAT;
-  instance_->core_.HandleInterrupt(EtherCAT::EscEvent::SYNC1, true);
+  instance_->core_.HandleEvent(EtherCAT::EscEvent::SYNC1, true);
 }
 
-EtherCAT::EscEvent HPMECATDevice::ReadPdiEvents() const
-{
-  const uint32_t raw_events = esc_.AL_EVT_REQ;
-  EtherCAT::EscEvent events = EtherCAT::EscEvent::NONE;
-
-  if ((raw_events & ESC_AL_EVT_REQ_ALC_EVT_MASK) != 0U)
-  {
-    events = events | EtherCAT::EscEvent::AL_CONTROL;
-  }
-  if ((raw_events & ESC_AL_EVT_REQ_SM_ACT_MASK) != 0U)
-  {
-    events = events | EtherCAT::EscEvent::SYNC_MANAGER_CHANGE;
-  }
-  if ((raw_events & ESC_AL_EVT_REQ_SM_INT_MASK) != 0U)
-  {
-    events = events | EtherCAT::EscEvent::SYNC_MANAGER;
-  }
-  if ((raw_events & ESC_AL_EVT_REQ_WDG_PD_MASK) != 0U)
-  {
-    events = events | EtherCAT::EscEvent::WATCHDOG;
-  }
-  if ((raw_events & ESC_AL_EVT_REQ_EE_EMU_MASK) != 0U)
-  {
-    events = events | EtherCAT::EscEvent::EEPROM;
-  }
-  if ((raw_events & ESC_AL_EVT_REQ_ST_DC_SYNC0_MASK) != 0U)
-  {
-    events = events | EtherCAT::EscEvent::SYNC0;
-  }
-  if ((raw_events & ESC_AL_EVT_REQ_ST_DC_SYNC1_MASK) != 0U)
-  {
-    events = events | EtherCAT::EscEvent::SYNC1;
-  }
-  if ((raw_events & ESC_AL_EVT_REQ_DCL_EVT_MASK) != 0U)
-  {
-    events = events | EtherCAT::EscEvent::DISTRIBUTED_CLOCK_LATCH;
-  }
-  return events;
-}
 
 void HPMECATDevice::EnableInterrupts()
 {

@@ -32,22 +32,28 @@ class DeviceCore final
   DeviceCore(DeviceCore&&) = delete;
   DeviceCore& operator=(DeviceCore&&) = delete;
 
-  /** Enter the protocol core from the board driver's ESC IRQ path. */
-  void HandleInterrupt(EscEvent events, bool in_isr);
-
   /**
-   * Hand one AL Event Request snapshot to the core.
+   * Enter the protocol core from the board driver's ESC IRQ path.
    *
-   * Every board driver reads the same register, so the translation from raw
-   * bits to EscEvent lives here rather than in each driver.
+   * The AL Event Request register (0x0220) is read-clear and only the driver
+   * may read it, so its value is handed in here: bit 8..15 name the sync
+   * manager that fired, which the core cannot recover by reading again.
    *
    * @param raw_alevent value read from 0x0220 (not an EscEvent).
    * @param in_isr      whether the driver is calling from an interrupt.
    */
-  void HandleAlevent(uint16_t raw_alevent, bool in_isr);
+  void HandleAlevent(uint32_t raw_alevent, bool in_isr);
+
+  /**
+   * Enter the core for an event that has no register behind it.
+   *
+   * Used for the edge events the driver detects itself, e.g. SYNC0/SYNC1 on a
+   * dedicated interrupt line.
+   */
+  void HandleEvent(EscEvent event, bool in_isr);
 
   /** AL Event Request bits to normalized events. */
-  [[nodiscard]] static EscEvent TranslateAlevent(uint16_t raw_alevent);
+  [[nodiscard]] static EscEvent TranslateAlevent(uint32_t raw_alevent);
 
   /**
    * Let the PDI interrupt report only the events this device handles, by
@@ -148,12 +154,14 @@ class DeviceCore final
   void StopOutputs();
 
   void ProcessAlControl();
+  /** Shared body of the two public entry points. */
+  void Dispatch(EscEvent events, uint32_t raw_alevent);
   void RequestState(AlState requested);
   void CommitState(AlState next_state);
   void Fail(AlState fallback_state, AlError error);
   void PublishAlStatus();
 
-  [[nodiscard]] uint32_t ProcessSyncManagerEvents();
+  void ProcessSyncManagerEvents(uint32_t sync_manager_events);
   void TransferOutputs();
   void TransferInputs();
 

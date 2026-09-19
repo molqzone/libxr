@@ -75,7 +75,6 @@ class HPMECATDevice final : public EtherCAT::EscPort
  private:
   static constexpr size_t ESC_ADDRESS_SPACE_SIZE = 0x10000U;
 
-  [[nodiscard]] EtherCAT::EscEvent ReadPdiEvents() const;
   void EnableInterrupts();
   void DisableInterrupts();
 

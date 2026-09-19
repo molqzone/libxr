@@ -76,18 +76,21 @@ ErrorCode DeviceCore::SetAleventMask(uint16_t mask)
                      ConstRawData(bytes, sizeof(bytes)));
 }
 
-void DeviceCore::HandleAlevent(uint16_t raw_alevent, bool in_isr)
+void DeviceCore::HandleAlevent(uint32_t raw_alevent, bool in_isr)
 {
-  const EscEvent events = TranslateAlevent(raw_alevent);
-  if (events != EscEvent::NONE)
-  {
-    // ProcessSyncManagerEvents() re-reads 0x0220 to learn which SM fired, so
-    // this path must not clear the register for it.
-    HandleInterrupt(events, in_isr);
-  }
+  in_isr_ = in_isr;
+  Dispatch(TranslateAlevent(raw_alevent), raw_alevent);
 }
 
-EscEvent DeviceCore::TranslateAlevent(uint16_t raw_alevent)
+void DeviceCore::HandleEvent(EscEvent event, bool in_isr)
+{
+  in_isr_ = in_isr;
+  // No register value behind an edge event: nothing to carry down for the SM
+  // dispatch.
+  Dispatch(event, 0U);
+}
+
+EscEvent DeviceCore::TranslateAlevent(uint32_t raw_alevent)
 {
   EscEvent events = EscEvent::NONE;
 
@@ -121,10 +124,8 @@ EscEvent DeviceCore::TranslateAlevent(uint16_t raw_alevent)
   return events;
 }
 
-void DeviceCore::HandleInterrupt(EscEvent events, bool in_isr)
+void DeviceCore::Dispatch(EscEvent events, uint32_t raw_alevent)
 {
-  in_isr_ = in_isr;
-
   if (HasEvent(events, EscEvent::AL_CONTROL))
   {
     ProcessAlControl();
@@ -149,7 +150,7 @@ void DeviceCore::HandleInterrupt(EscEvent events, bool in_isr)
 
   if (HasEvent(events, EscEvent::SYNC_MANAGER))
   {
-    (void)ProcessSyncManagerEvents();
+    ProcessSyncManagerEvents(raw_alevent);
   }
 
   if (HasEvent(events, EscEvent::SYNC0) || HasEvent(events, EscEvent::SYNC1))
@@ -663,31 +664,23 @@ void DeviceCore::PublishAlStatus()
   (void)WriteEsc(EscRegister::AL_STATUS, status_bytes, sizeof(status_bytes));
 }
 
-uint32_t DeviceCore::ProcessSyncManagerEvents()
+void DeviceCore::ProcessSyncManagerEvents(uint32_t sync_manager_events)
 {
-  uint8_t bytes[4]{};
-  if (ReadEsc(EscRegister::AL_EVENT_REQUEST, bytes, sizeof(bytes)) != ErrorCode::OK)
-  {
-    return 0U;
-  }
-
-  const uint32_t request = ReadLe32(bytes);
-  if (mailbox_.enabled && (request & (EscRegister::SyncManagerEvent(mailbox_.request_sync_manager) |
+  if (mailbox_.enabled && (sync_manager_events & (EscRegister::SyncManagerEvent(mailbox_.request_sync_manager) |
                                       EscRegister::SyncManagerEvent(mailbox_.response_sync_manager))) != 0U)
   {
-    ProcessMailbox(request);
+    ProcessMailbox(sync_manager_events);
   }
   if (process_data_.valid && process_data_.output_size != 0U &&
-      (request & EscRegister::SyncManagerEvent(process_data_.output_sync_manager)) != 0U)
+      (sync_manager_events & EscRegister::SyncManagerEvent(process_data_.output_sync_manager)) != 0U)
   {
     TransferOutputs();
   }
   if (process_data_.valid && process_data_.input_size != 0U &&
-      (request & EscRegister::SyncManagerEvent(process_data_.input_sync_manager)) != 0U)
+      (sync_manager_events & EscRegister::SyncManagerEvent(process_data_.input_sync_manager)) != 0U)
   {
     TransferInputs();
   }
-  return request;
 }
 
 void DeviceCore::TransferOutputs()
