@@ -235,13 +235,22 @@ else()
   target_compile_definitions(${PROJECT_NAME} PUBLIC EIGEN_NO_IO)
 endif()
 
+set(_xr_modules_loaded FALSE)
 if(XROBOT_MODULES_DIR)
-  if(NOT EXISTS "${XROBOT_MODULES_DIR}/CMakeLists.txt")
-    message(FATAL_ERROR
-      "XRobot source list is missing. Resolve modules before configuring the BSP.")
+  if(EXISTS "${XROBOT_MODULES_DIR}/CMakeLists.txt")
+    include("${XROBOT_MODULES_DIR}/CMakeLists.txt")
+    set(_xr_modules_loaded TRUE)
+  else()
+    file(GLOB _xr_nested_module_lists
+      "${XROBOT_MODULES_DIR}/*/CMakeLists.txt")
+    foreach(_xr_module_list IN LISTS _xr_nested_module_lists)
+      include("${_xr_module_list}")
+      set(_xr_modules_loaded TRUE)
+    endforeach()
   endif()
-  include("${XROBOT_MODULES_DIR}/CMakeLists.txt")
+endif()
 
+if(_xr_modules_loaded)
   # BSP toolchains may omit NDEBUG even in Release. Export the actual native
   # build profile to the generated entry without changing global optimization.
   target_compile_definitions(${PROJECT_NAME} PUBLIC
