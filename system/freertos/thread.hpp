@@ -62,19 +62,19 @@ class Thread
    * configuration constraints defined by `configMAX_PRIORITIES`.
    */
   template <typename ArgType>
-  void Create(ArgType arg, void (*function)(ArgType arg), const char *name,
+  void Create(ArgType arg, void (*function)(ArgType arg), const char* name,
               size_t stack_depth, Thread::Priority priority)
   {
-    ASSERT(configMAX_PRIORITIES >= 6);
+    static_assert(configMAX_PRIORITIES >= 6);
 
     class ThreadBlock
     {
      public:
       ThreadBlock(decltype(function) fun, ArgType arg) : fun_(fun), arg_(arg) {}
 
-      static void Port(void *arg)
+      static void Port(void* arg)
       {
-        ThreadBlock *block = static_cast<ThreadBlock *>(arg);
+        ThreadBlock* block = static_cast<ThreadBlock*>(arg);
         block->fun_(block->arg_);
         delete block;
       }
@@ -85,18 +85,22 @@ class Thread
 
     auto block = new ThreadBlock(function, arg);
 
-    uint32_t stack_size = stack_depth / 4;
-
-    if (stack_depth % 4 != 0)
+    // LibXR 栈深度使用字节；xTaskCreate() 接收 StackType_t 个数。
+    // LibXR stack depth is in bytes; xTaskCreate() consumes StackType_t units.
+    // ESP-IDF 将 StackType_t 定义为 uint8_t，因此同一换算自然保留字节语义。
+    // ESP-IDF defines StackType_t as uint8_t, so the same conversion preserves byte
+    // units.
+    uint32_t stack_size = static_cast<uint32_t>(stack_depth / sizeof(StackType_t));
+    if ((stack_depth % sizeof(StackType_t)) != 0U)
     {
-      stack_size += 1;
+      stack_size += 1U;
     }
 
     auto ans = xTaskCreate(block->Port, name, stack_size, block,
                            static_cast<uint32_t>(priority), &(this->thread_handle_));
     UNUSED(ans);
     UNUSED(block);
-    ASSERT(ans == pdPASS);
+    REQUIRE(ans == pdPASS);
   }
 
   /**
@@ -111,10 +115,7 @@ class Thread
    *         Gets the current system time in milliseconds
    * @return 当前时间（毫秒） Current time in milliseconds
    */
-  static uint32_t GetTime()
-  {
-    return static_cast<uint32_t>(Timebase::GetMilliseconds());
-  }
+  static uint32_t GetTime() { return static_cast<uint32_t>(Timebase::GetMilliseconds()); }
 
   /**
    * @brief  让线程进入休眠状态

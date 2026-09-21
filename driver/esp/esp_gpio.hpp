@@ -1,17 +1,13 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstdint>
 
 #include "driver/gpio.h"
+#include "esp_def.hpp"
 #include "gpio.hpp"
 #include "hal/gpio_hal.h"
 
-static inline gpio_dev_t* LibXREspGpioHw()
-{
-  return GPIO_HAL_GET_HW(0);
-}
+static inline gpio_dev_t* LibXREspGpioHw() { return GPIO_HAL_GET_HW(0); }
 
 namespace LibXR
 {
@@ -79,9 +75,9 @@ class ESP32GPIO : public GPIO
 
     if (!isr_handler_added_)
     {
-      if (gpio_isr_handler_add(gpio_num_, ESP32GPIO::InterruptDispatcher,
-                               reinterpret_cast<void*>(
-                                   static_cast<uintptr_t>(gpio_num_))) != ESP_OK)
+      if (gpio_isr_handler_add(
+              gpio_num_, ESP32GPIO::InterruptDispatcher,
+              reinterpret_cast<void*>(static_cast<uintptr_t>(gpio_num_))) != ESP_OK)
       {
         return ErrorCode::INIT_ERR;
       }
@@ -152,10 +148,12 @@ class ESP32GPIO : public GPIO
         break;
       case Direction::OUTPUT_PUSH_PULL:
         gpio_hal_input_disable(&hal, gpio_num_);
+        gpio_hal_matrix_out_default(&hal, gpio_num_);
         gpio_hal_output_enable(&hal, gpio_num_);
         break;
       case Direction::OUTPUT_OPEN_DRAIN:
         gpio_hal_input_enable(&hal, gpio_num_);
+        gpio_hal_matrix_out_default(&hal, gpio_num_);
         gpio_hal_output_enable(&hal, gpio_num_);
         gpio_hal_od_enable(&hal, gpio_num_);
         break;

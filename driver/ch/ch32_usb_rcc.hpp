@@ -145,7 +145,9 @@ inline void ConfigureUsbHsPhyFromHse()
   // legal combinations stay explicit and auditable.
   UsbHsPllConfig cfg = {};
   const uint32_t hse_hz = static_cast<uint32_t>(HSE_VALUE);
-  ASSERT(TryGetUsbHsPllConfigForHse(hse_hz, cfg));
+  [[maybe_unused]] const auto try_get_usb_hs_pll_config_for_hse_result =
+      TryGetUsbHsPllConfigForHse(hse_hz, cfg);
+  ASSERT(try_get_usb_hs_pll_config_for_hse_result);
 
   RCC_USBHSPLLCLKConfig(RCC_HSBHSPLLCLKSource_HSE);
   RCC_USBHSConfig(cfg.divider_cfg);
@@ -160,7 +162,8 @@ inline void ConfigureUsb48M()
   // 部分 CH32V30x 可以从 USBHS PHY PLL 提供共享 48 MHz USB 时钟；
   // 这种情况下先选 PHY 路径，再让各控制器自己打开总线时钟。
   // Some CH32V30x parts can source the shared 48 MHz USB clock from the USBHS PHY PLL;
-  // in that case, select the PHY path first and let each controller enable its own bus clock.
+  // in that case, select the PHY path first and let each controller enable its own bus
+  // clock.
   ConfigureUsbHsPhyFromHse();
   RCC_USBCLK48MConfig(RCC_USBCLK48MCLKSource_USBPHY);
 #else

@@ -1,8 +1,7 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include "driver/ledc.h"
+#include "esp_def.hpp"
 #include "esp_err.h"
 #include "hal/ledc_hal.h"
 #include "pwm.hpp"
@@ -39,7 +38,7 @@ class ESP32PWM : public PWM
     const esp_err_t err = ledc_channel_config(&channel_conf);
     if (err != ESP_OK)
     {
-      ASSERT(false);
+      REQUIRE(false);
     }
   }
 
@@ -119,4 +118,3 @@ class ESP32PWM : public PWM
 };
 
 }  // namespace LibXR
-

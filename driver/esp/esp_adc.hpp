@@ -1,13 +1,12 @@
 #pragma once
 
-#include "esp_def.hpp"
-
 #include <cstddef>
 #include <cstdint>
 
 #include "adc.hpp"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_oneshot.h"
+#include "esp_def.hpp"
 #include "hal/adc_types.h"
 #include "soc/soc_caps.h"
 
@@ -50,10 +49,8 @@ class ESP32ADC
       adc_unit_t unit, const adc_channel_t* channels, uint8_t num_channels,
       uint32_t freq = SOC_ADC_SAMPLE_FREQ_THRES_LOW,
       adc_atten_t attenuation = ADC_ATTEN_DB_12,
-      adc_bitwidth_t bitwidth =
-          static_cast<adc_bitwidth_t>(SOC_ADC_DIGI_MAX_BITWIDTH),
+      adc_bitwidth_t bitwidth = static_cast<adc_bitwidth_t>(SOC_ADC_DIGI_MAX_BITWIDTH),
       float reference_voltage = 3.3f, size_t dma_buf_size = 256);
-
 
   Channel& GetChannel(uint8_t idx);
 
@@ -75,13 +72,13 @@ class ESP32ADC
   void ConfigureAnalogPad(adc_channel_t channel) const;
   bool InitCalibration();
   bool InitOneshot();
+  ContinuousInitResult InitContinuous(uint32_t freq, size_t dma_buf_size);
   float RawToVoltage(uint8_t idx, uint16_t raw) const;
 
 #if SOC_ADC_DIG_CTRL_SUPPORTED && SOC_ADC_DMA_SUPPORTED
   static bool IsDigiUnitSupported(adc_unit_t unit);
   static adc_digi_output_format_t ResolveContinuousFormat();
   void DrainContinuousFrames(uint32_t timeout_ms);
-  ContinuousInitResult InitContinuous(uint32_t freq, size_t dma_buf_size);
 #endif
 
   Channel* channels_ = nullptr;

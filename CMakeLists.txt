@@ -267,5 +267,6 @@ if(XROBOT_MODULES_DIR)
 endif()
 
 if(LIBXR_TEST_BUILD)
+  enable_testing()
   add_subdirectory(test)
 endif()

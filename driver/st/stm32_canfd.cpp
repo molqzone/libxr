@@ -351,9 +351,10 @@ ErrorCode STM32CANFD::SetConfig(const FDCAN::Configuration& cfg)
 #endif
 
 #ifdef FDCAN_CCCR_MON
-  if (cfg.mode.listen_only)
+  if (cfg.mode.loopback || cfg.mode.listen_only)
   {
-    // 总线监控（只听）
+    // 内部回环和只听模式都需要总线监控。
+    // Internal loopback and listen-only mode both require bus monitoring.
     SET_BIT(can->CCCR, FDCAN_CCCR_MON);
   }
   else
@@ -944,7 +945,10 @@ extern "C" void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef* hcan, uint32_t Rx
   auto can = STM32CANFD::map[STM32_FDCAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessRxInterrupt(FDCAN_RX_FIFO0);
+    while (HAL_FDCAN_GetRxFifoFillLevel(hcan, FDCAN_RX_FIFO0) > 0U)
+    {
+      can->ProcessRxInterrupt(FDCAN_RX_FIFO0);
+    }
   }
 }
 
@@ -954,7 +958,10 @@ extern "C" void HAL_FDCAN_RxFifo1Callback(FDCAN_HandleTypeDef* hcan, uint32_t Rx
   auto can = STM32CANFD::map[STM32_FDCAN_GetID(hcan->Instance)];
   if (can)
   {
-    can->ProcessRxInterrupt(FDCAN_RX_FIFO1);
+    while (HAL_FDCAN_GetRxFifoFillLevel(hcan, FDCAN_RX_FIFO1) > 0U)
+    {
+      can->ProcessRxInterrupt(FDCAN_RX_FIFO1);
+    }
   }
 }
 

@@ -7,7 +7,7 @@
 致力于成为最佳的嵌入式开发框架
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-[![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://jiu-xiao.github.io/libxr/)
+[![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://xrobot.work/libxr/)
 [![GitHub Issues](https://img.shields.io/github/issues/Jiu-xiao/libxr)](https://github.com/Jiu-xiao/libxr/issues)
 [![C/C++ CI](https://github.com/Jiu-xiao/libxr/actions/workflows/check.yml/badge.svg)](https://github.com/Jiu-xiao/libxr/actions/workflows/check.yml)
 [![Generate and Deploy Doxygen Docs](https://github.com/Jiu-xiao/libxr/actions/workflows/doxygen.yml/badge.svg)](https://github.com/Jiu-xiao/libxr/actions/workflows/doxygen.yml)
@@ -177,6 +177,17 @@ set(LIBXR_LOG_LEVEL 4)
 ```cmake
 set(LIBXR_TEST_BUILD True)
 ```
+
+自动测试在 `test/automatic/` 中镜像源码目录和源文件归属。在仓库根目录构建并执行完整测试：
+
+```sh
+cmake -S . -B build -DLIBXR_TEST_BUILD=ON -DLIBXR_DEV_ASSERT_BUILD=ON -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --parallel 8
+ctest --test-dir build --output-on-failure --no-tests=error
+```
+
+CTest 通过 util-linux 的 `script` 程序为运行测试提供所需的伪终端。
+构建矩阵、编译探针及手动测试预留目录说明见 [test/README.md](test/README.md)。
 
 ## 其他工具
 

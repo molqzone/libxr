@@ -181,7 +181,7 @@ class UAC1MicrophoneQ : public DeviceClass
     ID_OT_USB = 3
   };
 
-LIBXR_PACKED_BEGIN
+  LIBXR_PACKED_BEGIN
   /**
    * @brief AC 头描述符
    *        AC header descriptor
@@ -307,7 +307,7 @@ LIBXR_PACKED_BEGIN
     EndpointDescriptorIso9 ep_in;  ///< 标准 IN 端点（9B）/ Std IN EP (9B)
     CSEndpointGeneral ep_cs;       ///< 类特定端点 / CS EP
   };
-LIBXR_PACKED_END
+  LIBXR_PACKED_END
 
   // ===== DeviceClass 接口实现 / DeviceClass implementation =====
   /**
@@ -533,25 +533,24 @@ LIBXR_PACKED_END
         default:
           break;
       }
-      ASSERT(false);
+
       return ErrorCode::ARG_ERR;  // 长度不符等 / length mismatch, etc.
     }
 
     // ===== Feature Unit（收件人：Interface / AC 接口） / Feature Unit =====
     const uint8_t CS = static_cast<uint8_t>((wValue >> 8) & 0xFF);  // FU_MUTE / FU_VOLUME
-    const uint8_t CH = static_cast<uint8_t>(wValue & 0xFF);         // 0=主控, 1..N / 0=master, 1..N
+    const uint8_t CH =
+        static_cast<uint8_t>(wValue & 0xFF);  // 0=主控, 1..N / 0=master, 1..N
     const uint8_t ENT =
         static_cast<uint8_t>((wIndex >> 8) & 0xFF);           // 实体 ID / entity ID
     const uint8_t ITF = static_cast<uint8_t>(wIndex & 0xFF);  // 接口号 / interface num
 
     if (ITF != itf_ac_num_ || ENT != ID_FU)
     {
-      ASSERT(false);
       return ErrorCode::NOT_SUPPORT;
     }
     if (CH > CHANNELS)
     {
-      ASSERT(false);
       return ErrorCode::ARG_ERR;
     }
 
@@ -568,7 +567,7 @@ LIBXR_PACKED_END
           r.write_data = ConstRawData{&mute_, 1};
           return ErrorCode::OK;
         }
-        ASSERT(false);
+
         return ErrorCode::ARG_ERR;
 
       case FU_VOLUME:
@@ -618,11 +617,11 @@ LIBXR_PACKED_END
           default:
             break;
         }
-        ASSERT(false);
+
         return ErrorCode::ARG_ERR;
 
       default:
-        ASSERT(false);
+
         return ErrorCode::NOT_SUPPORT;
     }
   }
@@ -658,7 +657,6 @@ LIBXR_PACKED_END
   {
     if (itf != itf_as_num_)
     {
-      ASSERT(false);
       return ErrorCode::NOT_SUPPORT;
     }
     alt = streaming_ ? 1 : 0;
@@ -673,12 +671,11 @@ LIBXR_PACKED_END
   {
     if (itf != itf_as_num_)
     {
-      ASSERT(false);
       return ErrorCode::NOT_SUPPORT;
     }
     if (!ep_iso_in_)
     {
-      ASSERT(false);
+      DEV_ASSERT(false);
       return ErrorCode::FAILED;
     }
 
@@ -700,7 +697,7 @@ LIBXR_PACKED_END
         return ErrorCode::OK;
 
       default:
-        ASSERT(false);
+
         return ErrorCode::ARG_ERR;
     }
   }
@@ -816,12 +813,14 @@ LIBXR_PACKED_END
       {
         eff = 16;
       }
-      const uint32_t MICROFRAMES = 1u << (eff - 1u);  // 2^(bInterval-1) 个微帧 / microframes
-      service_hz_ = 8000u / MICROFRAMES;              // 8000 微帧/秒 / microframes per second
+      const uint32_t MICROFRAMES = 1u
+                                   << (eff - 1u);  // 2^(bInterval-1) 个微帧 / microframes
+      service_hz_ = 8000u / MICROFRAMES;  // 8000 微帧/秒 / microframes per second
     }
     else
     {
-      service_hz_ = 1000u;  // FS 等时：规范上 bInterval 必须为 1 帧 / FS isochronous requires bInterval=1
+      service_hz_ = 1000u;  // FS 等时：规范上 bInterval 必须为 1 帧 / FS isochronous
+                            // requires bInterval=1
     }
 
     // 2) 计算每服务周期应送字节。
@@ -842,7 +841,8 @@ LIBXR_PACKED_END
     w_max_packet_size_ = static_cast<uint16_t>(ceil_bpt);
 
     // 4) 若已构建过描述符，则运行时能力不得超过宣告值。
-    // 4) Once descriptors are built, runtime capability must not exceed the advertised value.
+    // 4) Once descriptors are built, runtime capability must not exceed the advertised
+    // value.
     if (desc_block_.ep_in.wMaxPacketSize != 0 &&
         w_max_packet_size_ > desc_block_.ep_in.wMaxPacketSize)
     {

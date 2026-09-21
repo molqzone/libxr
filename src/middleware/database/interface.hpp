@@ -74,14 +74,16 @@ class Database
         data_ = init_value;
         if (status == ErrorCode::NOT_FOUND)
         {
-          REQUIRE(database.Add(*this) == ErrorCode::OK);
+          [[maybe_unused]] const auto add_result = database.Add(*this);
+          REQUIRE(add_result == ErrorCode::OK);
         }
       }
     }
 
     /**
      * @brief 构造函数，初始化键，并在数据库不存在时赋默认值
-     *        (Constructor to initialize key, assigning default value if not found in the database).
+     *        (Constructor to initialize key, assigning default value if not found in the
+     * database).
      *
      * If the key does not exist in the database, it is initialized with zero.
      * 如果键在数据库中不存在，则初始化为零。
@@ -98,7 +100,8 @@ class Database
         Memory::FastSet(&data_, 0, sizeof(Data));
         if (status == ErrorCode::NOT_FOUND)
         {
-          REQUIRE(database.Add(*this) == ErrorCode::OK);
+          [[maybe_unused]] const auto add_result = database.Add(*this);
+          REQUIRE(add_result == ErrorCode::OK);
         }
       }
     }
