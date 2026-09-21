@@ -204,7 +204,6 @@ class DeviceClass : public ConfigDescriptorItem
   void SetInterfaceStringBaseIndex(uint8_t string_index);
 
   friend class DeviceComposition;
-  friend class DeviceCore;
 
   uint8_t interface_string_base_index_ =
       0u;  ///< 首个接口字符串索引 / First interface string index
