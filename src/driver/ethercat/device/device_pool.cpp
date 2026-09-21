@@ -14,8 +14,8 @@ DevicePool::DevicePool(const Storage& storage) : storage_(storage)
 
 bool DevicePool::Empty() const
 {
-  return class_count_ == 0 && object_count_ == 0 && entry_count_ == 0 && pdo_count_ == 0 &&
-         pdo_entry_count_ == 0;
+  return class_count_ == 0 && object_count_ == 0 && entry_count_ == 0 &&
+         pdo_count_ == 0 && pdo_entry_count_ == 0;
 }
 
 void DevicePool::AddClass(DeviceClass& device)

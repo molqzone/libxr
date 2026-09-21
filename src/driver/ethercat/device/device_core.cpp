@@ -6,6 +6,12 @@
 namespace LibXR::EtherCAT
 {
 
+// 0 RequestState calls, 1 last requested state, 2 ProcessAlControl calls,
+// 3 last AL control read, 4 CoE requests, 5 last CoE command, 6/7 spare.
+extern "C"
+{
+}
+
 namespace
 {
 
@@ -70,10 +76,9 @@ DeviceCore::DeviceCore(EscPort& port, DevicePool& pool,
 
 ErrorCode DeviceCore::SetAleventMask(uint16_t mask)
 {
-  const uint8_t bytes[2] = {static_cast<uint8_t>(mask & 0xFFU),
-                            static_cast<uint8_t>(mask >> 8U)};
-  return port_.Write(EscRegister::AL_EVENT_MASK,
-                     ConstRawData(bytes, sizeof(bytes)));
+  // How the register has to be touched is a property of the attached ESC, so the
+  // port owns it (see EscPort::WriteAleventMask).
+  return port_.WriteAleventMask(mask);
 }
 
 void DeviceCore::HandleAlevent(uint32_t raw_alevent, bool in_isr)
@@ -114,8 +119,7 @@ EscEvent DeviceCore::TranslateAlevent(uint32_t raw_alevent)
   {
     events = events | EscEvent::SYNC_MANAGER;
   }
-  if ((raw_alevent & (EscRegister::EVENT_DC_LATCH |
-                      EscRegister::EVENT_DC_SYNC0 |
+  if ((raw_alevent & (EscRegister::EVENT_DC_LATCH | EscRegister::EVENT_DC_SYNC0 |
                       EscRegister::EVENT_DC_SYNC1)) != 0U)
   {
     events = events | EscEvent::SYNC0;
@@ -134,7 +138,8 @@ void DeviceCore::Dispatch(EscEvent events, uint32_t raw_alevent)
   if (HasEvent(events, EscEvent::SYNC_MANAGER_CHANGE))
   {
     AlError error = AlError::NONE;
-    if (IsState(state_, AlState::SAFE_OPERATIONAL) || IsState(state_, AlState::OPERATIONAL))
+    if (IsState(state_, AlState::SAFE_OPERATIONAL) ||
+        IsState(state_, AlState::OPERATIONAL))
     {
       if (!ValidateProcessDataConfiguration(error))
       {
@@ -172,7 +177,8 @@ uint16_t DeviceCore::ReadLe16(const uint8_t* data)
 uint32_t DeviceCore::ReadLe32(const uint8_t* data)
 {
   return static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8U) |
-         (static_cast<uint32_t>(data[2]) << 16U) | (static_cast<uint32_t>(data[3]) << 24U);
+         (static_cast<uint32_t>(data[2]) << 16U) |
+         (static_cast<uint32_t>(data[3]) << 24U);
 }
 
 void DeviceCore::WriteLe16(uint8_t* data, uint16_t value)
@@ -201,30 +207,38 @@ ErrorCode DeviceCore::WriteEsc(uint16_t address, const void* source, size_t size
 
 ErrorCode DeviceCore::ReadEscConfiguration()
 {
-  uint8_t supported_channels[2]{};
-  if (ReadEsc(EscRegister::FMMU_COUNT, supported_channels, sizeof(supported_channels)) != ErrorCode::OK)
+  // The channel counts are a property of the device; the pool is a fixed capacity
+  // view of them, sized by the board module's Config. A device that exposes more
+  // FMMUs or sync managers than this composition reserved cannot be driven - using
+  // only the first N would leave a master's channel unserved and silently
+  // misbehave - so it is reported as a capacity error. The choice of capacity
+  // itself belongs to the module, not here.
+  uint8_t device_channels[2]{};
+  if (ReadEsc(EscRegister::FMMU_COUNT, device_channels, sizeof(device_channels)) !=
+      ErrorCode::OK)
   {
     return ErrorCode::FAILED;
   }
-  if (supported_channels[0] > fmmus_.size() || supported_channels[1] > sync_managers_.size())
+  if (device_channels[0] > fmmus_.size() || device_channels[1] > sync_managers_.size())
   {
     return ErrorCode::OUT_OF_RANGE;
   }
-  fmmu_count_ = supported_channels[0];
-  sync_manager_count_ = supported_channels[1];
+  fmmu_count_ = device_channels[0];
+  sync_manager_count_ = device_channels[1];
 
   for (uint8_t index = 0; index < sync_manager_count_; ++index)
   {
     uint8_t bytes[EscRegister::SYNC_MANAGER_SIZE]{};
-    const uint16_t address =
-        static_cast<uint16_t>(EscRegister::SYNC_MANAGER_BASE + index * EscRegister::SYNC_MANAGER_SIZE);
+    const uint16_t address = static_cast<uint16_t>(
+        EscRegister::SYNC_MANAGER_BASE + index * EscRegister::SYNC_MANAGER_SIZE);
     const ErrorCode result = ReadEsc(address, bytes, sizeof(bytes));
     if (result != ErrorCode::OK)
     {
       return result;
     }
 
-    sync_managers_[index] = {ReadLe16(bytes), ReadLe16(bytes + 2U), bytes[4], bytes[5], bytes[6], bytes[7]};
+    sync_managers_[index] = {
+        ReadLe16(bytes), ReadLe16(bytes + 2U), bytes[4], bytes[5], bytes[6], bytes[7]};
   }
 
   for (uint8_t index = sync_manager_count_; index < sync_managers_.size(); ++index)
@@ -235,16 +249,29 @@ ErrorCode DeviceCore::ReadEscConfiguration()
   for (uint8_t index = 0; index < fmmu_count_; ++index)
   {
     uint8_t bytes[EscRegister::FMMU_SIZE]{};
-    const uint16_t address = static_cast<uint16_t>(EscRegister::FMMU_BASE + index * EscRegister::FMMU_SIZE);
+    const uint16_t address =
+        static_cast<uint16_t>(EscRegister::FMMU_BASE + index * EscRegister::FMMU_SIZE);
     const ErrorCode result = ReadEsc(address, bytes, sizeof(bytes));
     if (result != ErrorCode::OK)
     {
       return result;
     }
 
-    fmmus_[index] = {
-        ReadLe32(bytes), ReadLe16(bytes + 4U), bytes[6], bytes[7], ReadLe16(bytes + 8U), bytes[10], bytes[11],
-        bytes[12]};
+    // FMMU n block, 16 bytes (ETG.1000-4): logical start address (u32) and length
+    // (u16), the logical start and stop bit inside the first and last byte,
+    // physical start address (u16) and start bit, the type (1 = read/write, 2 =
+    // read, 3 = write) and the activate flag. Field names are assigned one by one
+    // so the byte offsets stay readable.
+    Fmmu fmmu{};
+    fmmu.logical_start = ReadLe32(bytes);
+    fmmu.logical_length = ReadLe16(bytes + 4U);
+    fmmu.logical_start_bit = bytes[6];
+    fmmu.logical_stop_bit = bytes[7];
+    fmmu.physical_start = ReadLe16(bytes + 8U);
+    fmmu.physical_start_bit = bytes[10];
+    fmmu.type = bytes[11];
+    fmmu.activate = bytes[12];
+    fmmus_[index] = fmmu;
   }
   for (uint8_t index = fmmu_count_; index < fmmus_.size(); ++index)
   {
@@ -263,8 +290,8 @@ ErrorCode DeviceCore::SetSyncManagerEnabled(uint8_t index, bool enabled)
   uint8_t activate = sync_managers_[index].activate;
   activate = enabled ? static_cast<uint8_t>(activate | EscRegister::SYNC_MANAGER_ENABLE)
                      : static_cast<uint8_t>(activate & ~EscRegister::SYNC_MANAGER_ENABLE);
-  const uint16_t address =
-      static_cast<uint16_t>(EscRegister::SYNC_MANAGER_BASE + index * EscRegister::SYNC_MANAGER_SIZE + 6U);
+  const uint16_t address = static_cast<uint16_t>(
+      EscRegister::SYNC_MANAGER_BASE + index * EscRegister::SYNC_MANAGER_SIZE + 6U);
   const ErrorCode result = WriteEsc(address, &activate, sizeof(activate));
   if (result == ErrorCode::OK)
   {
@@ -273,13 +300,28 @@ ErrorCode DeviceCore::SetSyncManagerEnabled(uint8_t index, bool enabled)
   return result;
 }
 
-const DeviceCore::SyncManager* DeviceCore::FindSyncManager(uint8_t operation_mode, uint8_t direction,
-                                                           uint8_t* index, bool require_nonzero_length) const
+ErrorCode DeviceCore::SetMailboxBufferStatus(uint8_t index, bool full)
+{
+  if (index >= sync_manager_count_)
+  {
+    return ErrorCode::OUT_OF_RANGE;
+  }
+
+  const uint16_t address = static_cast<uint16_t>(
+      EscRegister::SYNC_MANAGER_BASE + index * EscRegister::SYNC_MANAGER_SIZE + 5U);
+  const uint8_t status = full ? EscRegister::SYNC_MANAGER_STATUS_MAILBOX : 0U;
+  return WriteEsc(address, &status, sizeof(status));
+}
+
+const DeviceCore::SyncManager* DeviceCore::FindSyncManager(
+    uint8_t operation_mode, uint8_t direction, uint8_t* index,
+    bool require_nonzero_length) const
 {
   for (uint8_t candidate = 0; candidate < sync_manager_count_; ++candidate)
   {
     const SyncManager& sync_manager = sync_managers_[candidate];
-    if ((sync_manager.control & EscRegister::SYNC_MANAGER_OPERATION_MODE_MASK) == operation_mode &&
+    if ((sync_manager.control & EscRegister::SYNC_MANAGER_OPERATION_MODE_MASK) ==
+            operation_mode &&
         (sync_manager.control & EscRegister::SYNC_MANAGER_DIRECTION_MASK) == direction &&
         (!require_nonzero_length || sync_manager.length != 0U))
     {
@@ -303,26 +345,32 @@ bool DeviceCore::ValidateMailboxConfiguration(AlError& error)
 
   uint8_t request_index = 0;
   uint8_t response_index = 0;
-  const SyncManager* request = FindSyncManager(EscRegister::SYNC_MANAGER_MAILBOX_MODE,
-                                               EscRegister::SYNC_MANAGER_ECAT_WRITE, &request_index);
-  const SyncManager* response = FindSyncManager(EscRegister::SYNC_MANAGER_MAILBOX_MODE,
-                                                EscRegister::SYNC_MANAGER_ECAT_READ, &response_index);
+  const SyncManager* request =
+      FindSyncManager(EscRegister::SYNC_MANAGER_MAILBOX_MODE,
+                      EscRegister::SYNC_MANAGER_ECAT_WRITE, &request_index);
+  const SyncManager* response =
+      FindSyncManager(EscRegister::SYNC_MANAGER_MAILBOX_MODE,
+                      EscRegister::SYNC_MANAGER_ECAT_READ, &response_index);
   if (request == nullptr && response == nullptr)
   {
     mailbox_ = {};
     return true;
   }
-  if (request == nullptr || response == nullptr || request->length == 0U || response->length == 0U)
+  if (request == nullptr || response == nullptr || request->length == 0U ||
+      response->length == 0U)
   {
     error = AlError::INVALID_MAILBOX_CONFIGURATION;
     return false;
   }
 
-  const uint32_t request_end = static_cast<uint32_t>(request->physical_start) + request->length;
-  const uint32_t response_end = static_cast<uint32_t>(response->physical_start) + response->length;
+  const uint32_t request_end =
+      static_cast<uint32_t>(request->physical_start) + request->length;
+  const uint32_t response_end =
+      static_cast<uint32_t>(response->physical_start) + response->length;
   if (request->length < MAILBOX_HEADER_SIZE + SDO_INITIATE_PAYLOAD_SIZE ||
-      response->length < MAILBOX_HEADER_SIZE + SDO_INITIATE_PAYLOAD_SIZE || request_end > 0x10000U ||
-      response_end > 0x10000U || pool_.storage_.mailbox_request == nullptr ||
+      response->length < MAILBOX_HEADER_SIZE + SDO_INITIATE_PAYLOAD_SIZE ||
+      request_end > 0x10000U || response_end > 0x10000U ||
+      pool_.storage_.mailbox_request == nullptr ||
       pool_.storage_.mailbox_request_capacity < request->length ||
       pool_.storage_.mailbox_response == nullptr ||
       pool_.storage_.mailbox_response_capacity < response->length)
@@ -347,9 +395,11 @@ const DeviceCore::Fmmu* DeviceCore::FindFmmu(uint16_t physical_start, size_t len
   for (uint8_t index = 0; index < fmmu_count_; ++index)
   {
     const Fmmu& fmmu = fmmus_[index];
-    const uint32_t fmmu_end = static_cast<uint32_t>(fmmu.physical_start) + fmmu.logical_length;
-    if ((fmmu.activate & EscRegister::FMMU_ENABLE) != 0U && (fmmu.type & required_type) != 0U &&
-        fmmu.physical_start_bit == 0U && fmmu.physical_start <= physical_start && physical_end <= fmmu_end)
+    const uint32_t fmmu_end =
+        static_cast<uint32_t>(fmmu.physical_start) + fmmu.logical_length;
+    if ((fmmu.activate & EscRegister::FMMU_ENABLE) != 0U &&
+        (fmmu.type & required_type) != 0U && fmmu.physical_start_bit == 0U &&
+        fmmu.physical_start <= physical_start && physical_end <= fmmu_end)
     {
       return &fmmu;
     }
@@ -367,11 +417,13 @@ bool DeviceCore::ValidateProcessDataConfiguration(AlError& error)
 
   const size_t output_size = composition_.GetPdoByteSize(PdoDirection::RX);
   const size_t input_size = composition_.GetPdoByteSize(PdoDirection::TX);
-  const size_t process_data_capacity = output_size > input_size ? output_size : input_size;
+  const size_t process_data_capacity =
+      output_size > input_size ? output_size : input_size;
   if (output_size > std::numeric_limits<uint16_t>::max() ||
       input_size > std::numeric_limits<uint16_t>::max() ||
-      (process_data_capacity != 0U && (pool_.storage_.process_data == nullptr ||
-                                       pool_.storage_.process_data_capacity < process_data_capacity)))
+      (process_data_capacity != 0U &&
+       (pool_.storage_.process_data == nullptr ||
+        pool_.storage_.process_data_capacity < process_data_capacity)))
   {
     error = AlError::INVALID_OUTPUT_MAPPING;
     return false;
@@ -379,29 +431,33 @@ bool DeviceCore::ValidateProcessDataConfiguration(AlError& error)
 
   uint8_t output_index = 0;
   const SyncManager* output =
-      output_size == 0U ? nullptr
-                        : FindSyncManager(EscRegister::SYNC_MANAGER_BUFFERED_MODE,
-                                          EscRegister::SYNC_MANAGER_ECAT_WRITE, &output_index, true);
-  if (output_size != 0U &&
-      (output == nullptr || output->length != output_size ||
-       FindFmmu(output->physical_start, output_size, EscRegister::FMMU_WRITE_ENABLE) == nullptr))
+      output_size == 0U
+          ? nullptr
+          : FindSyncManager(EscRegister::SYNC_MANAGER_BUFFERED_MODE,
+                            EscRegister::SYNC_MANAGER_ECAT_WRITE, &output_index, true);
+  if (output_size != 0U && (output == nullptr || output->length != output_size ||
+                            FindFmmu(output->physical_start, output_size,
+                                     EscRegister::FMMU_WRITE_ENABLE) == nullptr))
   {
-    error = output == nullptr || output->length != output_size ? AlError::INVALID_OUTPUT_SYNC_MANAGER
-                                                               : AlError::INVALID_OUTPUT_MAPPING;
+    error = output == nullptr || output->length != output_size
+                ? AlError::INVALID_OUTPUT_SYNC_MANAGER
+                : AlError::INVALID_OUTPUT_MAPPING;
     return false;
   }
 
   uint8_t input_index = 0;
-  const SyncManager* input = input_size == 0U
-                                 ? nullptr
-                                 : FindSyncManager(EscRegister::SYNC_MANAGER_BUFFERED_MODE,
-                                                   EscRegister::SYNC_MANAGER_ECAT_READ, &input_index, true);
-  if (input_size != 0U &&
-      (input == nullptr || input->length != input_size ||
-       FindFmmu(input->physical_start, input_size, EscRegister::FMMU_READ_ENABLE) == nullptr))
+  const SyncManager* input =
+      input_size == 0U
+          ? nullptr
+          : FindSyncManager(EscRegister::SYNC_MANAGER_BUFFERED_MODE,
+                            EscRegister::SYNC_MANAGER_ECAT_READ, &input_index, true);
+  if (input_size != 0U && (input == nullptr || input->length != input_size ||
+                           FindFmmu(input->physical_start, input_size,
+                                    EscRegister::FMMU_READ_ENABLE) == nullptr))
   {
-    error = input == nullptr || input->length != input_size ? AlError::INVALID_INPUT_SYNC_MANAGER
-                                                            : AlError::INVALID_INPUT_FMMU_CONFIGURATION;
+    error = input == nullptr || input->length != input_size
+                ? AlError::INVALID_INPUT_SYNC_MANAGER
+                : AlError::INVALID_INPUT_FMMU_CONFIGURATION;
     return false;
   }
 
@@ -427,8 +483,16 @@ bool DeviceCore::StartMailbox()
   {
     return true;
   }
-  return SetSyncManagerEnabled(mailbox_.request_sync_manager, true) == ErrorCode::OK &&
-         SetSyncManagerEnabled(mailbox_.response_sync_manager, true) == ErrorCode::OK;
+  if (SetSyncManagerEnabled(mailbox_.request_sync_manager, true) != ErrorCode::OK ||
+      SetSyncManagerEnabled(mailbox_.response_sync_manager, true) != ErrorCode::OK)
+  {
+    return false;
+  }
+  // Start from an empty handshake: a stale "buffer full" would make the master
+  // wait for a response that is already gone.
+  (void)SetMailboxBufferStatus(mailbox_.request_sync_manager, false);
+  (void)SetMailboxBufferStatus(mailbox_.response_sync_manager, false);
+  return true;
 }
 
 void DeviceCore::StopMailbox()
@@ -509,105 +573,134 @@ void DeviceCore::ProcessAlControl()
 
   switch (control & 0x000FU)
   {
-  case static_cast<uint16_t>(AlState::INIT):
-    RequestState(AlState::INIT);
-    break;
-  case static_cast<uint16_t>(AlState::PRE_OPERATIONAL):
-    RequestState(AlState::PRE_OPERATIONAL);
-    break;
-  case static_cast<uint16_t>(AlState::BOOTSTRAP):
-    RequestState(AlState::BOOTSTRAP);
-    break;
-  case static_cast<uint16_t>(AlState::SAFE_OPERATIONAL):
-    RequestState(AlState::SAFE_OPERATIONAL);
-    break;
-  case static_cast<uint16_t>(AlState::OPERATIONAL):
-    RequestState(AlState::OPERATIONAL);
-    break;
-  default:
-    Fail(state_, AlError::UNKNOWN_STATE);
-    break;
+    case static_cast<uint16_t>(AlState::INIT):
+      RequestState(AlState::INIT);
+      break;
+    case static_cast<uint16_t>(AlState::PRE_OPERATIONAL):
+      RequestState(AlState::PRE_OPERATIONAL);
+      break;
+    case static_cast<uint16_t>(AlState::BOOTSTRAP):
+      RequestState(AlState::BOOTSTRAP);
+      break;
+    case static_cast<uint16_t>(AlState::SAFE_OPERATIONAL):
+      RequestState(AlState::SAFE_OPERATIONAL);
+      break;
+    case static_cast<uint16_t>(AlState::OPERATIONAL):
+      RequestState(AlState::OPERATIONAL);
+      break;
+    default:
+      Fail(state_, AlError::UNKNOWN_STATE);
+      break;
   }
 }
 
 void DeviceCore::RequestState(AlState requested)
 {
+  // The ESC raises one AL Control event flag, so a master that writes SAFEOP and
+  // OP back to back can be observed here as a direct PREOP -> OP request (and
+  // INIT -> SAFEOP).  EtherCAT expects the slave to pass through the
+  // intermediate states instead of refusing the jump, so walk up first and keep
+  // the intermediate step's error if it fails.
+  if (requested == AlState::OPERATIONAL &&
+      (IsState(state_, AlState::INIT) || IsState(state_, AlState::PRE_OPERATIONAL)))
+  {
+    RequestState(AlState::SAFE_OPERATIONAL);
+    if (!IsState(state_, AlState::SAFE_OPERATIONAL))
+    {
+      return;
+    }
+  }
+  else if (requested == AlState::SAFE_OPERATIONAL && IsState(state_, AlState::INIT))
+  {
+    RequestState(AlState::PRE_OPERATIONAL);
+    if (!IsState(state_, AlState::PRE_OPERATIONAL))
+    {
+      return;
+    }
+  }
+
   const AlState current = state_;
   switch (requested)
   {
-  case AlState::INIT:
-    StopProcessData();
-    StopMailbox();
-    al_error_ = AlError::NONE;
-    CommitState(AlState::INIT);
-    return;
-
-  case AlState::PRE_OPERATIONAL:
-    if (!IsState(current, AlState::INIT) && !IsState(current, AlState::PRE_OPERATIONAL) &&
-        !IsState(current, AlState::SAFE_OPERATIONAL) && !IsState(current, AlState::OPERATIONAL))
-    {
-      Fail(current, AlError::INVALID_STATE_CHANGE);
+    case AlState::INIT:
+      StopProcessData();
+      StopMailbox();
+      al_error_ = AlError::NONE;
+      CommitState(AlState::INIT);
       return;
-    }
-    StopProcessData();
-    if (IsState(current, AlState::INIT) && !StartMailbox())
-    {
-      Fail(AlState::INIT, AlError::INVALID_MAILBOX_CONFIGURATION);
-      return;
-    }
-    al_error_ = AlError::NONE;
-    CommitState(AlState::PRE_OPERATIONAL);
-    return;
 
-  case AlState::SAFE_OPERATIONAL:
-    if (IsState(current, AlState::OPERATIONAL))
-    {
-      StopOutputs();
+    case AlState::PRE_OPERATIONAL:
+      if (!IsState(current, AlState::INIT) &&
+          !IsState(current, AlState::PRE_OPERATIONAL) &&
+          !IsState(current, AlState::SAFE_OPERATIONAL) &&
+          !IsState(current, AlState::OPERATIONAL))
+      {
+        Fail(current, AlError::INVALID_STATE_CHANGE);
+        return;
+      }
+      StopProcessData();
+      if (IsState(current, AlState::INIT) && !StartMailbox())
+      {
+        Fail(AlState::INIT, AlError::INVALID_MAILBOX_CONFIGURATION);
+        return;
+      }
+      al_error_ = AlError::NONE;
+      CommitState(AlState::PRE_OPERATIONAL);
+      return;
+
+    case AlState::SAFE_OPERATIONAL:
+      if (IsState(current, AlState::OPERATIONAL))
+      {
+        StopOutputs();
+        al_error_ = AlError::NONE;
+        CommitState(AlState::SAFE_OPERATIONAL);
+        return;
+      }
+      if (!IsState(current, AlState::PRE_OPERATIONAL) &&
+          !IsState(current, AlState::SAFE_OPERATIONAL))
+      {
+        Fail(current, AlError::INVALID_STATE_CHANGE);
+        return;
+      }
+      {
+        AlError error = AlError::NONE;
+        if (!ValidateProcessDataConfiguration(error) || !StartProcessData())
+        {
+          Fail(AlState::PRE_OPERATIONAL, error == AlError::NONE
+                                             ? AlError::INVALID_SYNC_MANAGER_CONFIGURATION
+                                             : error);
+          return;
+        }
+      }
       al_error_ = AlError::NONE;
       CommitState(AlState::SAFE_OPERATIONAL);
+      TransferInputs();
       return;
-    }
-    if (!IsState(current, AlState::PRE_OPERATIONAL) && !IsState(current, AlState::SAFE_OPERATIONAL))
-    {
-      Fail(current, AlError::INVALID_STATE_CHANGE);
-      return;
-    }
-    {
-      AlError error = AlError::NONE;
-      if (!ValidateProcessDataConfiguration(error) || !StartProcessData())
+
+    case AlState::OPERATIONAL:
+      if (!IsState(current, AlState::SAFE_OPERATIONAL) &&
+          !IsState(current, AlState::OPERATIONAL))
       {
-        Fail(AlState::PRE_OPERATIONAL,
-             error == AlError::NONE ? AlError::INVALID_SYNC_MANAGER_CONFIGURATION : error);
+        Fail(current, AlError::INVALID_STATE_CHANGE);
         return;
       }
-    }
-    al_error_ = AlError::NONE;
-    CommitState(AlState::SAFE_OPERATIONAL);
-    TransferInputs();
-    return;
-
-  case AlState::OPERATIONAL:
-    if (!IsState(current, AlState::SAFE_OPERATIONAL) && !IsState(current, AlState::OPERATIONAL))
-    {
-      Fail(current, AlError::INVALID_STATE_CHANGE);
-      return;
-    }
-    {
-      AlError error = AlError::NONE;
-      if (!ValidateProcessDataConfiguration(error) || !StartProcessData())
       {
-        Fail(AlState::PRE_OPERATIONAL,
-             error == AlError::NONE ? AlError::INVALID_SYNC_MANAGER_CONFIGURATION : error);
-        return;
+        AlError error = AlError::NONE;
+        if (!ValidateProcessDataConfiguration(error) || !StartProcessData())
+        {
+          Fail(AlState::PRE_OPERATIONAL, error == AlError::NONE
+                                             ? AlError::INVALID_SYNC_MANAGER_CONFIGURATION
+                                             : error);
+          return;
+        }
       }
-    }
-    al_error_ = AlError::NONE;
-    CommitState(AlState::OPERATIONAL);
-    return;
+      al_error_ = AlError::NONE;
+      CommitState(AlState::OPERATIONAL);
+      return;
 
-  case AlState::BOOTSTRAP:
-    Fail(current, AlError::BOOT_NOT_SUPPORTED);
-    return;
+    case AlState::BOOTSTRAP:
+      Fail(current, AlError::BOOT_NOT_SUPPORTED);
+      return;
   }
 }
 
@@ -633,7 +726,8 @@ void DeviceCore::Fail(AlState fallback_state, AlError error)
   {
     StopProcessData();
   }
-  else if (fallback_state == AlState::SAFE_OPERATIONAL && IsState(state_, AlState::OPERATIONAL))
+  else if (fallback_state == AlState::SAFE_OPERATIONAL &&
+           IsState(state_, AlState::OPERATIONAL))
   {
     StopOutputs();
   }
@@ -666,33 +760,33 @@ void DeviceCore::PublishAlStatus()
 
 void DeviceCore::ProcessSyncManagerEvents(uint32_t sync_manager_events)
 {
-  if (mailbox_.enabled && (sync_manager_events & (EscRegister::SyncManagerEvent(mailbox_.request_sync_manager) |
-                                      EscRegister::SyncManagerEvent(mailbox_.response_sync_manager))) != 0U)
+  if (mailbox_.enabled &&
+      (sync_manager_events &
+       (EscRegister::SyncManagerEvent(mailbox_.request_sync_manager) |
+        EscRegister::SyncManagerEvent(mailbox_.response_sync_manager))) != 0U)
   {
     ProcessMailbox(sync_manager_events);
   }
-  if (process_data_.valid && process_data_.output_size != 0U &&
-      (sync_manager_events & EscRegister::SyncManagerEvent(process_data_.output_sync_manager)) != 0U)
-  {
-    TransferOutputs();
-  }
-  if (process_data_.valid && process_data_.input_size != 0U &&
-      (sync_manager_events & EscRegister::SyncManagerEvent(process_data_.input_sync_manager)) != 0U)
-  {
-    TransferInputs();
-  }
+  // Process data is deliberately not driven from here. The SM event bits are not
+  // a trustworthy "the master wrote outputs" signal on this hardware (reading AL
+  // Event Request clears it, and the PDI's own buffer accesses raise SM events
+  // again), so a driver polls it with PollProcessData() once per frame, the same
+  // way the reference stack does it from its main loop.
 }
 
 void DeviceCore::TransferOutputs()
 {
-  if (!IsState(state_, AlState::OPERATIONAL) || !process_data_.valid || process_data_.output_size == 0U)
+  if (!IsState(state_, AlState::OPERATIONAL) || !process_data_.valid ||
+      process_data_.output_size == 0U)
   {
     return;
   }
 
   uint8_t* buffer = pool_.storage_.process_data;
-  if (ReadEsc(process_data_.output_address, buffer, process_data_.output_size) != ErrorCode::OK ||
-      composition_.UnpackPdos(in_isr_, ConstRawData(buffer, process_data_.output_size)) != ErrorCode::OK)
+  if (ReadEsc(process_data_.output_address, buffer, process_data_.output_size) !=
+          ErrorCode::OK ||
+      composition_.UnpackPdos(in_isr_, ConstRawData(buffer, process_data_.output_size)) !=
+          ErrorCode::OK)
   {
     Fail(AlState::SAFE_OPERATIONAL, AlError::NO_VALID_OUTPUTS);
     return;
@@ -702,7 +796,8 @@ void DeviceCore::TransferOutputs()
 
 void DeviceCore::TransferInputs()
 {
-  if ((!IsState(state_, AlState::SAFE_OPERATIONAL) && !IsState(state_, AlState::OPERATIONAL)) ||
+  if ((!IsState(state_, AlState::SAFE_OPERATIONAL) &&
+       !IsState(state_, AlState::OPERATIONAL)) ||
       !process_data_.valid || process_data_.input_size == 0U)
   {
     return;
@@ -710,11 +805,56 @@ void DeviceCore::TransferInputs()
 
   composition_.DispatchInputsRequested(in_isr_);
   uint8_t* buffer = pool_.storage_.process_data;
-  if (composition_.PackPdos(in_isr_, RawData(buffer, process_data_.input_size)) != ErrorCode::OK ||
-      WriteEsc(process_data_.input_address, buffer, process_data_.input_size) != ErrorCode::OK)
+  if (composition_.PackPdos(in_isr_, RawData(buffer, process_data_.input_size)) !=
+          ErrorCode::OK ||
+      WriteEsc(process_data_.input_address, buffer, process_data_.input_size) !=
+          ErrorCode::OK)
   {
     Fail(AlState::PRE_OPERATIONAL, AlError::NO_VALID_INPUTS);
   }
+}
+
+void DeviceCore::PollMailbox()
+{
+  if (!mailbox_.enabled || IsState(state_, AlState::INIT))
+  {
+    return;
+  }
+  // Only retry a response that is waiting for the master. Reading the request
+  // mailbox here as well would re-answer the request that is still sitting in it
+  // every time this is called, which floods the master with unsolicited
+  // responses and keeps it from reaching OP.
+  (void)FlushMailboxResponse();
+}
+
+void DeviceCore::PollProcessData()
+{
+  if (!process_data_.valid || IsState(state_, AlState::INIT) ||
+      IsState(state_, AlState::PRE_OPERATIONAL))
+  {
+    return;
+  }
+  // TransferOutputs/TransferInputs carry their own state and validity guards.
+  // Outputs are read before the inputs are built so the inputs reflect the
+  // outputs of this frame, which is the "echo lags one cycle" the master sees.
+  if (process_data_.output_size != 0U)
+  {
+    TransferOutputs();
+  }
+  if (process_data_.input_size != 0U)
+  {
+    TransferInputs();
+  }
+}
+
+void DeviceCore::PollAlControl()
+{
+  if (IsState(state_, AlState::INIT) && !mailbox_.enabled)
+  {
+    // Nothing is running yet: the mailbox is only started on the way to PREOP,
+    // and ProcessAlControl would still read the register.
+  }
+  ProcessAlControl();
 }
 
 void DeviceCore::ProcessMailbox(uint32_t sync_manager_events)
@@ -728,28 +868,29 @@ void DeviceCore::ProcessMailbox(uint32_t sync_manager_events)
   {
     return;
   }
-  if (mailbox_.has_cached_response)
-  {
-    uint8_t status = 0;
-    const uint16_t status_address =
-        static_cast<uint16_t>(EscRegister::SYNC_MANAGER_BASE +
-                              mailbox_.response_sync_manager * EscRegister::SYNC_MANAGER_SIZE + 5U);
-    if (ReadEsc(status_address, &status, sizeof(status)) != ErrorCode::OK ||
-        (status & EscRegister::SYNC_MANAGER_STATUS_MAILBOX) != 0U)
-    {
-      return;
-    }
-  }
-  if ((sync_manager_events & EscRegister::SyncManagerEvent(mailbox_.request_sync_manager)) == 0U)
+  if ((sync_manager_events &
+       EscRegister::SyncManagerEvent(mailbox_.request_sync_manager)) == 0U)
   {
     return;
   }
 
   uint8_t* request = pool_.storage_.mailbox_request;
-  if (ReadEsc(mailbox_.request.physical_start, request, mailbox_.request.length) != ErrorCode::OK)
+  // The whole SyncManager buffer has to be read. This ESC does not accept a
+  // partial mailbox read: reading only the header (to size the transfer) leaves
+  // the buffer status set - measured SM0 status 0x48 and the request never
+  // consumed, SDO dead - which is also why a master reads its mailboxes at full
+  // SM length. The read cost is therefore inherent, not a choice.
+  if (ReadEsc(mailbox_.request.physical_start, request, mailbox_.request.length) !=
+      ErrorCode::OK)
   {
     return;
   }
+
+  // The buffer is ours now: release it so the master may write the next request
+  // (the ESC refuses a write into a mailbox whose buffer status is still set,
+  // and ecx_mbxempty() polls exactly this bit). Released after the read, so the
+  // master cannot overwrite the message mid-read.
+  (void)SetMailboxBufferStatus(mailbox_.request_sync_manager, false);
 
   const size_t payload_size = ReadLe16(request);
   if (payload_size > mailbox_.request.length - MAILBOX_HEADER_SIZE)
@@ -762,16 +903,22 @@ void DeviceCore::ProcessMailbox(uint32_t sync_manager_events)
     return;
   }
 
+  // No duplicate detection here. The mailbox counter alone cannot identify a
+  // retransmission on this master: SOEM repeats it for the requests of one SDO
+  // transfer, so an initiate and its segments all arrive with the same counter.
+  // Treating the segments as duplicates replayed the cached initiate response
+  // and the transfer silently transferred nothing. Re-processing a genuinely
+  // repeated request is harmless (SDO reads and writes are idempotent) and it is
+  // what keeps the state machine honest.
   const uint8_t protocol = static_cast<uint8_t>(request[5] & 0x0FU);
   const uint8_t counter = static_cast<uint8_t>((request[5] >> 4U) & 0x07U);
-  if (counter != 0U && mailbox_.has_cached_response && counter == mailbox_.last_request_counter &&
-      protocol == mailbox_.last_request_protocol)
-  {
-    mailbox_.response_pending = true;
-    (void)FlushMailboxResponse();
-    return;
-  }
 
+  // A request we have not seen before proves the master consumed the previous
+  // response - the mailbox is a strict request/response pair - so neither the
+  // cached response nor a response still waiting to be published may gate this
+  // one. Waiting for the master to read (the old check) left the request unread
+  // and replayed the stale response on every retry, which is a deadlock.
+  mailbox_.response_pending = false;
   mailbox_.last_request_counter = counter;
   mailbox_.last_request_protocol = protocol;
   mailbox_.has_cached_response = false;
@@ -792,17 +939,35 @@ bool DeviceCore::FlushMailboxResponse()
 
   uint8_t status = 0;
   const uint16_t status_address = static_cast<uint16_t>(
-      EscRegister::SYNC_MANAGER_BASE + mailbox_.response_sync_manager * EscRegister::SYNC_MANAGER_SIZE + 5U);
+      EscRegister::SYNC_MANAGER_BASE +
+      mailbox_.response_sync_manager * EscRegister::SYNC_MANAGER_SIZE + 5U);
   if (ReadEsc(status_address, &status, sizeof(status)) != ErrorCode::OK ||
       (status & EscRegister::SYNC_MANAGER_STATUS_MAILBOX) != 0U)
   {
     return false;
   }
 
-  if (WriteEsc(mailbox_.response.physical_start, pool_.storage_.mailbox_response, mailbox_.response_size) !=
-      ErrorCode::OK)
+  if (WriteEsc(mailbox_.response.physical_start, pool_.storage_.mailbox_response,
+               mailbox_.response_size) != ErrorCode::OK)
   {
     return false;
+  }
+
+  // Publish the response. The ESC raises the read mailbox's "full" status bit -
+  // the one the master polls - when the *last byte* of the SyncManager buffer is
+  // written; writing the status register by hand has no effect on this part
+  // (measured: it reads back 0x80 either way). The reference AX58400 slave stack
+  // does exactly this: write the message, then a single terminating byte at the
+  // mailbox end address.
+  if (mailbox_.response_size < mailbox_.response.length)
+  {
+    const uint8_t terminator = 0;
+    const uint16_t end_address = static_cast<uint16_t>(mailbox_.response.physical_start +
+                                                       mailbox_.response.length - 1U);
+    if (WriteEsc(end_address, &terminator, sizeof(terminator)) != ErrorCode::OK)
+    {
+      return false;
+    }
   }
   mailbox_.response_pending = false;
   return true;
@@ -817,12 +982,16 @@ bool DeviceCore::QueueMailboxResponse(uint8_t protocol, size_t payload_size)
     return false;
   }
 
+  // Mailbox header, 6 bytes (ETG.1000-4): length of the payload that follows, the
+  // address (0 means the master), the channel, the priority and the type byte,
+  // whose low nibble is the protocol and whose high nibble is the mailbox counter
+  // (1..7, incremented per response so the master can tell them apart).
   uint8_t* buffer = pool_.storage_.mailbox_response;
   mailbox_.response_counter = static_cast<uint8_t>((mailbox_.response_counter % 7U) + 1U);
   WriteLe16(buffer, static_cast<uint16_t>(payload_size));
-  buffer[2] = 0;
-  buffer[3] = 0;
-  buffer[4] = 0;
+  buffer[2] = 0;  // address: 0 = master
+  buffer[3] = 0;  // channel
+  buffer[4] = 0;  // priority: 0 = lowest
   buffer[5] = static_cast<uint8_t>(protocol | (mailbox_.response_counter << 4U));
   mailbox_.response_size = payload_size + MAILBOX_HEADER_SIZE;
   mailbox_.has_cached_response = true;
@@ -904,8 +1073,12 @@ void DeviceCore::ProcessSdoUpload(const uint8_t* payload, size_t payload_size)
   }
   if (sdo_transfer_.direction != SdoTransferDirection::NONE)
   {
-    SendSdoAbort(index, subindex, SDO_ABORT_TIMEOUT);
-    return;
+    // The mailbox is a strict request/response pair, so an initiate that arrives
+    // while a transfer is still marked as running means that transfer is over:
+    // its segments would have been dispatched to the segment handlers instead.
+    // Aborting here (0x05040000) made the slave refuse every later SDO once one
+    // transfer leaked its state, which is exactly what the master saw.
+    ResetSdoTransfer();
   }
 
   ObjectEntry* entry = composition_.GetObjectDictionary().FindEntry({index, subindex});
@@ -933,7 +1106,8 @@ void DeviceCore::ProcessSdoUpload(const uint8_t* payload, size_t payload_size)
   WriteLe16(response + 3U, index);
   response[5] = subindex;
 
-  const size_t inline_capacity = mailbox_.response.length - MAILBOX_HEADER_SIZE - SDO_INITIATE_PAYLOAD_SIZE;
+  const size_t inline_capacity =
+      mailbox_.response.length - MAILBOX_HEADER_SIZE - SDO_INITIATE_PAYLOAD_SIZE;
   if (size <= 4U)
   {
     response[2] = static_cast<uint8_t>(response[2] | SDO_EXPEDITED | ((4U - size) << 2U));
@@ -975,8 +1149,12 @@ void DeviceCore::ProcessSdoDownload(const uint8_t* payload, size_t payload_size)
   }
   if (sdo_transfer_.direction != SdoTransferDirection::NONE)
   {
-    SendSdoAbort(index, subindex, SDO_ABORT_TIMEOUT);
-    return;
+    // The mailbox is a strict request/response pair, so an initiate that arrives
+    // while a transfer is still marked as running means that transfer is over:
+    // its segments would have been dispatched to the segment handlers instead.
+    // Aborting here (0x05040000) made the slave refuse every later SDO once one
+    // transfer leaked its state, which is exactly what the master saw.
+    ResetSdoTransfer();
   }
 
   ObjectEntry* entry = composition_.GetObjectDictionary().FindEntry({index, subindex});
@@ -1005,7 +1183,8 @@ void DeviceCore::ProcessSdoDownload(const uint8_t* payload, size_t payload_size)
       SendSdoAbort(index, subindex, SDO_ABORT_TYPE_MISMATCH);
       return;
     }
-    const size_t transfer_size = (command & SDO_SIZE_INDICATED) != 0U ? 4U - ((command >> 2U) & 0x03U) : 4U;
+    const size_t transfer_size =
+        (command & SDO_SIZE_INDICATED) != 0U ? 4U - ((command >> 2U) & 0x03U) : 4U;
     if (transfer_size != size)
     {
       SendSdoAbort(index, subindex, SDO_ABORT_TYPE_MISMATCH);
@@ -1031,9 +1210,37 @@ void DeviceCore::ProcessSdoDownload(const uint8_t* payload, size_t payload_size)
     SendSdoAbort(index, subindex, SDO_ABORT_TYPE_MISMATCH);
     return;
   }
+
+  // A normal (non expedited) download carries data in the initiate frame itself
+  // when the object fits the mailbox: the size is at payload[6..9] and the bytes
+  // follow right after it. Masters use that for everything up to the mailbox
+  // size, so replying without copying these bytes loses the whole transfer.
+  const size_t carried = payload_size - SDO_INITIATE_PAYLOAD_SIZE;
+  if (carried > size)
+  {
+    SendSdoAbort(index, subindex, SDO_ABORT_TYPE_MISMATCH);
+    return;
+  }
+  if (carried > 0U)
+  {
+    std::memcpy(entry->storage.addr_, payload + SDO_INITIATE_PAYLOAD_SIZE, carried);
+  }
+
+  if (carried == size)
+  {
+    if (composition_.DispatchObjectWrite(in_isr_, entry->address) != ErrorCode::OK)
+    {
+      SendSdoAbort(index, subindex, SDO_ABORT_GENERAL);
+      return;
+    }
+    (void)SendSdoDownloadResponse(index, subindex);
+    return;
+  }
+
+  // Only part of the object arrived: the rest follows as segments.
   if (SendSdoDownloadResponse(index, subindex))
   {
-    sdo_transfer_ = {SdoTransferDirection::DOWNLOAD, entry, size, 0U, false};
+    sdo_transfer_ = {SdoTransferDirection::DOWNLOAD, entry, size, carried, false};
   }
 }
 
@@ -1048,24 +1255,28 @@ void DeviceCore::ProcessSdoUploadSegment(const uint8_t* payload, size_t payload_
   const bool toggle = (payload[2] & SDO_TOGGLE) != 0U;
   if (toggle != sdo_transfer_.toggle)
   {
-    SendSdoAbort(sdo_transfer_.entry->address.index, sdo_transfer_.entry->address.subindex, SDO_ABORT_TOGGLE);
+    SendSdoAbort(sdo_transfer_.entry->address.index,
+                 sdo_transfer_.entry->address.subindex, SDO_ABORT_TOGGLE);
     ResetSdoTransfer();
     return;
   }
 
-  const size_t available = mailbox_.response.length - MAILBOX_HEADER_SIZE - SDO_SEGMENT_HEADER_SIZE;
+  const size_t available =
+      mailbox_.response.length - MAILBOX_HEADER_SIZE - SDO_SEGMENT_HEADER_SIZE;
   const size_t remaining = sdo_transfer_.size - sdo_transfer_.offset;
   const size_t transfer_size = remaining < available ? remaining : available;
   const bool last = transfer_size == remaining;
   uint8_t* response = pool_.storage_.mailbox_response + MAILBOX_HEADER_SIZE;
   WriteLe16(response, static_cast<uint16_t>(COE_SDO_RESPONSE << 12U));
-  response[2] = static_cast<uint8_t>((toggle ? SDO_TOGGLE : 0U) | (last ? SDO_LAST_SEGMENT : 0U));
+  response[2] =
+      static_cast<uint8_t>((toggle ? SDO_TOGGLE : 0U) | (last ? SDO_LAST_SEGMENT : 0U));
   if (last && transfer_size < 7U)
   {
     response[2] = static_cast<uint8_t>(response[2] | ((7U - transfer_size) << 1U));
   }
   std::memcpy(response + SDO_SEGMENT_HEADER_SIZE,
-              static_cast<const uint8_t*>(sdo_transfer_.entry->storage.addr_) + sdo_transfer_.offset,
+              static_cast<const uint8_t*>(sdo_transfer_.entry->storage.addr_) +
+                  sdo_transfer_.offset,
               transfer_size);
   if (QueueMailboxResponse(MAILBOX_COE, SDO_SEGMENT_HEADER_SIZE + transfer_size))
   {
@@ -1078,6 +1289,12 @@ void DeviceCore::ProcessSdoUploadSegment(const uint8_t* payload, size_t payload_
     {
       sdo_transfer_.toggle = !sdo_transfer_.toggle;
     }
+  }
+  else if (last)
+  {
+    // Same as for a download: a response that is still waiting for the master
+    // must not leave the transfer marked as running.
+    ResetSdoTransfer();
   }
 }
 
@@ -1093,7 +1310,8 @@ void DeviceCore::ProcessSdoDownloadSegment(const uint8_t* payload, size_t payloa
   const bool toggle = (command & SDO_TOGGLE) != 0U;
   if (toggle != sdo_transfer_.toggle)
   {
-    SendSdoAbort(sdo_transfer_.entry->address.index, sdo_transfer_.entry->address.subindex, SDO_ABORT_TOGGLE);
+    SendSdoAbort(sdo_transfer_.entry->address.index,
+                 sdo_transfer_.entry->address.subindex, SDO_ABORT_TOGGLE);
     ResetSdoTransfer();
     return;
   }
@@ -1101,40 +1319,52 @@ void DeviceCore::ProcessSdoDownloadSegment(const uint8_t* payload, size_t payloa
   size_t transfer_size = payload_size - SDO_SEGMENT_HEADER_SIZE;
   const bool last = (command & SDO_LAST_SEGMENT) != 0U;
   const size_t unused = last ? ((command >> 1U) & 0x07U) : 0U;
-  if (unused > transfer_size || transfer_size - unused > sdo_transfer_.size - sdo_transfer_.offset)
+  if (unused > transfer_size ||
+      transfer_size - unused > sdo_transfer_.size - sdo_transfer_.offset)
   {
-    SendSdoAbort(sdo_transfer_.entry->address.index, sdo_transfer_.entry->address.subindex,
-                 SDO_ABORT_TYPE_MISMATCH);
+    SendSdoAbort(sdo_transfer_.entry->address.index,
+                 sdo_transfer_.entry->address.subindex, SDO_ABORT_TYPE_MISMATCH);
     ResetSdoTransfer();
     return;
   }
   transfer_size -= unused;
-  std::memcpy(static_cast<uint8_t*>(sdo_transfer_.entry->storage.addr_) + sdo_transfer_.offset,
-              payload + SDO_SEGMENT_HEADER_SIZE, transfer_size);
+  std::memcpy(
+      static_cast<uint8_t*>(sdo_transfer_.entry->storage.addr_) + sdo_transfer_.offset,
+      payload + SDO_SEGMENT_HEADER_SIZE, transfer_size);
   sdo_transfer_.offset += transfer_size;
 
   if (last && sdo_transfer_.offset != sdo_transfer_.size)
   {
-    SendSdoAbort(sdo_transfer_.entry->address.index, sdo_transfer_.entry->address.subindex,
-                 SDO_ABORT_TYPE_MISMATCH);
+    SendSdoAbort(sdo_transfer_.entry->address.index,
+                 sdo_transfer_.entry->address.subindex, SDO_ABORT_TYPE_MISMATCH);
     ResetSdoTransfer();
     return;
   }
 
   uint8_t* response = pool_.storage_.mailbox_response + MAILBOX_HEADER_SIZE;
   WriteLe16(response, static_cast<uint16_t>(COE_SDO_RESPONSE << 12U));
-  response[2] = static_cast<uint8_t>(SDO_DOWNLOAD_SEGMENT_RESPONSE | (toggle ? SDO_TOGGLE : 0U));
+  response[2] =
+      static_cast<uint8_t>(SDO_DOWNLOAD_SEGMENT_RESPONSE | (toggle ? SDO_TOGGLE : 0U));
 
-  if (last && composition_.DispatchObjectWrite(in_isr_, sdo_transfer_.entry->address) != ErrorCode::OK)
+  if (last && composition_.DispatchObjectWrite(in_isr_, sdo_transfer_.entry->address) !=
+                  ErrorCode::OK)
   {
-    SendSdoAbort(sdo_transfer_.entry->address.index, sdo_transfer_.entry->address.subindex,
-                 SDO_ABORT_GENERAL);
+    SendSdoAbort(sdo_transfer_.entry->address.index,
+                 sdo_transfer_.entry->address.subindex, SDO_ABORT_GENERAL);
     ResetSdoTransfer();
     return;
   }
 
   if (!QueueMailboxResponse(MAILBOX_COE, SDO_SEGMENT_HEADER_SIZE))
   {
+    // The response could not be queued because the previous one is still waiting
+    // for the master to read it. The transfer itself is finished either way, so
+    // the state must not stay in DOWNLOAD: that would abort every following
+    // request with a timeout.
+    if (last)
+    {
+      ResetSdoTransfer();
+    }
     return;
   }
   if (last)
@@ -1172,14 +1402,14 @@ bool DeviceCore::IsObjectReadable(const ObjectEntry& entry) const
 {
   switch (state_)
   {
-  case AlState::PRE_OPERATIONAL:
-    return HasAccess(entry.access, ObjectAccess::READ_PRE_OPERATIONAL);
-  case AlState::SAFE_OPERATIONAL:
-    return HasAccess(entry.access, ObjectAccess::READ_SAFE_OPERATIONAL);
-  case AlState::OPERATIONAL:
-    return HasAccess(entry.access, ObjectAccess::READ_OPERATIONAL);
-  default:
-    return false;
+    case AlState::PRE_OPERATIONAL:
+      return HasAccess(entry.access, ObjectAccess::READ_PRE_OPERATIONAL);
+    case AlState::SAFE_OPERATIONAL:
+      return HasAccess(entry.access, ObjectAccess::READ_SAFE_OPERATIONAL);
+    case AlState::OPERATIONAL:
+      return HasAccess(entry.access, ObjectAccess::READ_OPERATIONAL);
+    default:
+      return false;
   }
 }
 
@@ -1187,18 +1417,21 @@ bool DeviceCore::IsObjectWritable(const ObjectEntry& entry) const
 {
   switch (state_)
   {
-  case AlState::PRE_OPERATIONAL:
-    return HasAccess(entry.access, ObjectAccess::WRITE_PRE_OPERATIONAL);
-  case AlState::SAFE_OPERATIONAL:
-    return HasAccess(entry.access, ObjectAccess::WRITE_SAFE_OPERATIONAL);
-  case AlState::OPERATIONAL:
-    return HasAccess(entry.access, ObjectAccess::WRITE_OPERATIONAL);
-  default:
-    return false;
+    case AlState::PRE_OPERATIONAL:
+      return HasAccess(entry.access, ObjectAccess::WRITE_PRE_OPERATIONAL);
+    case AlState::SAFE_OPERATIONAL:
+      return HasAccess(entry.access, ObjectAccess::WRITE_SAFE_OPERATIONAL);
+    case AlState::OPERATIONAL:
+      return HasAccess(entry.access, ObjectAccess::WRITE_OPERATIONAL);
+    default:
+      return false;
   }
 }
 
-size_t DeviceCore::ObjectSize(const ObjectEntry& entry) const { return BytesForBits(entry.bit_length); }
+size_t DeviceCore::ObjectSize(const ObjectEntry& entry) const
+{
+  return BytesForBits(entry.bit_length);
+}
 
 void DeviceCore::ResetSdoTransfer() { sdo_transfer_ = {}; }
 

@@ -31,7 +31,10 @@ inline constexpr uint32_t EVENT_SYNC_MANAGER_CHANGE = 1U << 4U;
 inline constexpr uint32_t EVENT_EEPROM = 1U << 5U;
 inline constexpr uint32_t EVENT_WATCHDOG = 1U << 6U;
 inline constexpr uint32_t EVENT_SYNC_MANAGER_MASK = 0xFF00U;
-constexpr uint32_t SyncManagerEvent(uint8_t index) { return index < 16U ? (1U << (8U + index)) : 0U; }
+constexpr uint32_t SyncManagerEvent(uint8_t index)
+{
+  return index < 16U ? (1U << (8U + index)) : 0U;
+}
 
 inline constexpr uint8_t SYNC_MANAGER_ENABLE = 0x01U;
 inline constexpr uint8_t SYNC_MANAGER_OPERATION_MODE_MASK = 0x03U;

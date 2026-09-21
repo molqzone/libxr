@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <initializer_list>
 
+#include "core/esc_registers.hpp"
 #include "device/device_core.hpp"
 
 using namespace LibXR;
@@ -149,10 +150,15 @@ int main()
 
   esc.memory[0x1000] = 0xA5;
   core.HandleAlevent(EscRegister::SyncManagerEvent(4), false);
+  // Process data is polled, not moved by SM events: an SM event bit is not a
+  // trustworthy "the master wrote outputs" signal on this hardware, see the
+  // comment in DeviceCore::ProcessSyncManagerEvents.
+  core.PollProcessData();
   assert(application.output == 0xA5);
 
   application.input = 0x5A;
   core.HandleAlevent(EscRegister::SyncManagerEvent(5), false);
+  core.PollProcessData();
   assert(esc.memory[0x1100] == 0x5A);
 
   FakeEsc mailbox_esc;
@@ -204,7 +210,12 @@ int main()
 
   mailbox_esc.memory[0x1040] = 0;
   mailbox_core.HandleAlevent(EscRegister::SyncManagerEvent(0), false);
-  assert(mailbox_application.object_write_count == 1);
+  // There is no duplicate suppression: an SM0 event that repeats a request the
+  // master has not consumed is processed again, because the mailbox counter
+  // cannot tell a retransmission from the next segment of one SDO transfer, see
+  // the comment in DeviceCore::ProcessMailbox. The repeated write is idempotent
+  // and the response is published again.
+  assert(mailbox_application.object_write_count == 2);
   assert(mailbox_esc.memory[0x1040] == 6);
   assert(mailbox_esc.memory[0x1048] == 0x60);
 

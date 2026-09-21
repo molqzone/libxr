@@ -16,12 +16,14 @@ void CopyBitsToProcessData(uint8_t* destination, size_t destination_bit_offset,
 {
   for (size_t bit = 0; bit < bit_count; ++bit)
   {
-    const uint8_t source_bit = static_cast<uint8_t>((source[bit / 8U] >> (bit % 8U)) & 1U);
+    const uint8_t source_bit =
+        static_cast<uint8_t>((source[bit / 8U] >> (bit % 8U)) & 1U);
     uint8_t& destination_byte = destination[(destination_bit_offset + bit) / 8U];
     const uint8_t destination_mask =
         static_cast<uint8_t>(1U << ((destination_bit_offset + bit) % 8U));
-    destination_byte = source_bit != 0U ? static_cast<uint8_t>(destination_byte | destination_mask)
-                                        : static_cast<uint8_t>(destination_byte & ~destination_mask);
+    destination_byte = source_bit != 0U
+                           ? static_cast<uint8_t>(destination_byte | destination_mask)
+                           : static_cast<uint8_t>(destination_byte & ~destination_mask);
   }
 }
 
@@ -31,11 +33,13 @@ void CopyBitsFromProcessData(uint8_t* destination, const uint8_t* source,
   for (size_t bit = 0; bit < bit_count; ++bit)
   {
     const uint8_t source_bit = static_cast<uint8_t>(
-        (source[(source_bit_offset + bit) / 8U] >> ((source_bit_offset + bit) % 8U)) & 1U);
+        (source[(source_bit_offset + bit) / 8U] >> ((source_bit_offset + bit) % 8U)) &
+        1U);
     uint8_t& destination_byte = destination[bit / 8U];
     const uint8_t destination_mask = static_cast<uint8_t>(1U << (bit % 8U));
-    destination_byte = source_bit != 0U ? static_cast<uint8_t>(destination_byte | destination_mask)
-                                        : static_cast<uint8_t>(destination_byte & ~destination_mask);
+    destination_byte = source_bit != 0U
+                           ? static_cast<uint8_t>(destination_byte | destination_mask)
+                           : static_cast<uint8_t>(destination_byte & ~destination_mask);
   }
 }
 
@@ -57,9 +61,10 @@ Object& DeviceBuilder::AddObject(uint16_t index, ObjectCode code, const char* na
   return object;
 }
 
-ObjectEntry& DeviceBuilder::AddEntry(Object& object, uint8_t subindex, ObjectDataType type,
-                                    uint16_t bit_length, ObjectAccess access, const char* name,
-                                    RawData storage)
+ObjectEntry& DeviceBuilder::AddEntry(Object& object, uint8_t subindex,
+                                     ObjectDataType type, uint16_t bit_length,
+                                     ObjectAccess access, const char* name,
+                                     RawData storage)
 {
   ASSERT(&object == open_object_);
   ASSERT(object.owner == &owner_);
@@ -109,7 +114,8 @@ PdoEntry& DeviceBuilder::Map(Pdo& pdo, ObjectEntry& entry)
       (pdo.direction == PdoDirection::RX) ? ObjectAccess::RX_PDO : ObjectAccess::TX_PDO;
   ASSERT(HasAccess(entry.access, required_access));
 
-  const uint32_t next_bit_length = static_cast<uint32_t>(pdo.bit_length) + entry.bit_length;
+  const uint32_t next_bit_length =
+      static_cast<uint32_t>(pdo.bit_length) + entry.bit_length;
   ASSERT(next_bit_length <= std::numeric_limits<uint16_t>::max());
 
   if (pdo.entries == nullptr)
@@ -126,7 +132,7 @@ PdoEntry& DeviceBuilder::Map(Pdo& pdo, ObjectEntry& entry)
 }
 
 DeviceComposition::DeviceComposition(DevicePool& pool,
-                                   std::span<DeviceClass* const> classes)
+                                     std::span<DeviceClass* const> classes)
     : pool_(pool)
 {
   ASSERT(pool_.Empty());
@@ -149,8 +155,8 @@ DeviceComposition::DeviceComposition(DevicePool& pool,
 
 DeviceComposition::DeviceComposition(DevicePool& pool,
                                      std::initializer_list<DeviceClass*> classes)
-    : DeviceComposition(
-          pool, std::span<DeviceClass* const>(classes.begin(), classes.size()))
+    : DeviceComposition(pool,
+                        std::span<DeviceClass* const>(classes.begin(), classes.size()))
 {
 }
 
@@ -250,7 +256,8 @@ ErrorCode DeviceComposition::PackPdos(bool in_isr, RawData process_data)
     {
       const PdoEntry& pdo_entry = pdo.entries[entry_index];
       ObjectEntry& entry = *pdo_entry.object;
-      if (entry.storage.addr_ == nullptr || entry.storage.size_ < BytesForBits(entry.bit_length))
+      if (entry.storage.addr_ == nullptr ||
+          entry.storage.size_ < BytesForBits(entry.bit_length))
       {
         return ErrorCode::PTR_NULL;
       }
@@ -262,7 +269,8 @@ ErrorCode DeviceComposition::PackPdos(bool in_isr, RawData process_data)
       }
 
       CopyBitsToProcessData(bytes, pdo_bit_offset + pdo_entry.bit_offset,
-                            static_cast<const uint8_t*>(entry.storage.addr_), entry.bit_length);
+                            static_cast<const uint8_t*>(entry.storage.addr_),
+                            entry.bit_length);
     }
     pdo_bit_offset += pdo.bit_length;
   }
@@ -295,7 +303,8 @@ ErrorCode DeviceComposition::UnpackPdos(bool in_isr, ConstRawData process_data)
     {
       const PdoEntry& pdo_entry = pdo.entries[entry_index];
       ObjectEntry& entry = *pdo_entry.object;
-      if (entry.storage.addr_ == nullptr || entry.storage.size_ < BytesForBits(entry.bit_length))
+      if (entry.storage.addr_ == nullptr ||
+          entry.storage.size_ < BytesForBits(entry.bit_length))
       {
         return ErrorCode::PTR_NULL;
       }

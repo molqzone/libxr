@@ -52,6 +52,38 @@ class DeviceCore final
    */
   void HandleEvent(EscEvent event, bool in_isr);
 
+  /**
+   * Service the mailbox without a new AL event.
+   *
+   * A response that could not be published because the master had not read the
+   * previous one, and a request that was skipped for the same reason, are only
+   * picked up when the core is entered again. The master is waiting for that
+   * very response, so no further request will arrive to trigger it: a driver has
+   * to call this periodically for the mailbox to make progress.
+   */
+  void PollMailbox();
+
+  /**
+   * Service the process data without an AL event.
+   *
+   * The SM event bits are not a reliable "the master wrote new outputs" signal on
+   * this hardware: reading AL Event Request clears it, and the ESC re-raises SM
+   * events for the PDI's own buffer accesses. A driver polls the process data
+   * once per frame instead of relying on them.
+   */
+  void PollProcessData();
+
+  /**
+   * Re-read AL Control without waiting for its event.
+   *
+   * The AL Control event can be consumed by one of the driver's own register
+   * accesses racing the master's write, and then the request is simply gone -
+   * that is what made the SAFEOP -> OP transition intermittent. AL Control always
+   * holds the master's last requested state, so acting on it periodically
+   * converges the state machine no matter how the events landed.
+   */
+  void PollAlControl();
+
   /** AL Event Request bits to normalized events. */
   [[nodiscard]] static EscEvent TranslateAlevent(uint32_t raw_alevent);
 
@@ -141,6 +173,13 @@ class DeviceCore final
   [[nodiscard]] ErrorCode WriteEsc(uint16_t address, const void* source, size_t size);
   [[nodiscard]] ErrorCode ReadEscConfiguration();
   [[nodiscard]] ErrorCode SetSyncManagerEnabled(uint8_t index, bool enabled);
+
+  /**
+   * Mailbox handshake bit (SM status register, bit 3): the writer of a mailbox
+   * sets it, the reader clears it. The master polls SM1's bit to know a response
+   * is available and SM0's bit to know the request was consumed.
+   */
+  [[nodiscard]] ErrorCode SetMailboxBufferStatus(uint8_t index, bool full);
 
   [[nodiscard]] const SyncManager* FindSyncManager(uint8_t operation_mode, uint8_t direction, uint8_t* index,
                                                    bool require_nonzero_length = false) const;

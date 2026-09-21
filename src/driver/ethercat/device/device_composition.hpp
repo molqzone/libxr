@@ -24,7 +24,8 @@ class DeviceBuilder
                         const char* name, Value& value)
   {
     return AddEntry(object, subindex, ObjectDataTypeOf<Value>(),
-                    static_cast<uint16_t>(sizeof(Value) * 8U), access, name, RawData(value));
+                    static_cast<uint16_t>(sizeof(Value) * 8U), access, name,
+                    RawData(value));
   }
 
   Pdo& AddPdo(PdoDirection direction, uint16_t index);
@@ -59,7 +60,10 @@ class DeviceComposition
   DeviceComposition(DeviceComposition&&) = delete;
   DeviceComposition& operator=(DeviceComposition&&) = delete;
 
-  [[nodiscard]] const ObjectDictionary& GetObjectDictionary() const { return dictionary_; }
+  [[nodiscard]] const ObjectDictionary& GetObjectDictionary() const
+  {
+    return dictionary_;
+  }
   [[nodiscard]] const Pdo* FindPdo(PdoDirection direction, uint16_t index) const;
 
  private:

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core/object_dictionary.hpp"
 #include "core/al_state.hpp"
+#include "core/object_dictionary.hpp"
 
 namespace LibXR::EtherCAT
 {

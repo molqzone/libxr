@@ -79,29 +79,34 @@ class DevicePool
 namespace Detail
 {
 
-template <size_t ClassCapacity, size_t ObjectCapacity, size_t EntryCapacity, size_t PdoCapacity,
-          size_t PdoEntryCapacity, size_t ProcessDataCapacity, size_t MailboxCapacity>
+template <size_t ClassCapacity, size_t ObjectCapacity, size_t EntryCapacity,
+          size_t PdoCapacity, size_t PdoEntryCapacity, size_t ProcessDataCapacity,
+          size_t MailboxCapacity>
 class StaticDevicePoolStorage
 {
  protected:
+  // Not const: it hands the pool mutable pointers into the arrays below.
   [[nodiscard]] DevicePool::Storage GetStorage()
   {
-    return {classes_.data(),
-            ClassCapacity,
-            objects_.data(),
-            ObjectCapacity,
-            entries_.data(),
-            EntryCapacity,
-            pdos_.data(),
-            PdoCapacity,
-            pdo_entries_.data(),
-            PdoEntryCapacity,
-            process_data_.data(),
-            ProcessDataCapacity,
-            mailbox_request_.data(),
-            MailboxCapacity,
-            mailbox_response_.data(),
-            MailboxCapacity};
+    // Designated initializers (C++20, what this project is built with): a dozen
+    // positional arguments of the same type are impossible to check by eye, and
+    // the mailbox capacity feeds two different arrays.
+    return {.classes = classes_.data(),
+            .class_capacity = ClassCapacity,
+            .objects = objects_.data(),
+            .object_capacity = ObjectCapacity,
+            .entries = entries_.data(),
+            .entry_capacity = EntryCapacity,
+            .pdos = pdos_.data(),
+            .pdo_capacity = PdoCapacity,
+            .pdo_entries = pdo_entries_.data(),
+            .pdo_entry_capacity = PdoEntryCapacity,
+            .process_data = process_data_.data(),
+            .process_data_capacity = ProcessDataCapacity,
+            .mailbox_request = mailbox_request_.data(),
+            .mailbox_request_capacity = MailboxCapacity,
+            .mailbox_response = mailbox_response_.data(),
+            .mailbox_response_capacity = MailboxCapacity};
   }
 
  private:
@@ -123,16 +128,20 @@ class StaticDevicePoolStorage
  * Capacity is declared alongside the application composition and no dynamic
  * allocation is used while the dictionary and PDO mapping are built.
  */
-template <size_t ClassCapacity, size_t ObjectCapacity, size_t EntryCapacity, size_t PdoCapacity,
-          size_t PdoEntryCapacity, size_t ProcessDataCapacity = 128, size_t MailboxCapacity = 128>
+template <size_t ClassCapacity, size_t ObjectCapacity, size_t EntryCapacity,
+          size_t PdoCapacity, size_t PdoEntryCapacity, size_t ProcessDataCapacity = 128,
+          size_t MailboxCapacity = 128>
 class StaticDevicePool final
-    : private Detail::StaticDevicePoolStorage<ClassCapacity, ObjectCapacity, EntryCapacity, PdoCapacity,
-                                              PdoEntryCapacity, ProcessDataCapacity, MailboxCapacity>,
+    : private Detail::StaticDevicePoolStorage<
+          ClassCapacity, ObjectCapacity, EntryCapacity, PdoCapacity, PdoEntryCapacity,
+          ProcessDataCapacity, MailboxCapacity>,
       public DevicePool
 {
  private:
-  using Storage = Detail::StaticDevicePoolStorage<ClassCapacity, ObjectCapacity, EntryCapacity, PdoCapacity,
-                                                  PdoEntryCapacity, ProcessDataCapacity, MailboxCapacity>;
+  using Storage =
+      Detail::StaticDevicePoolStorage<ClassCapacity, ObjectCapacity, EntryCapacity,
+                                      PdoCapacity, PdoEntryCapacity, ProcessDataCapacity,
+                                      MailboxCapacity>;
 
  public:
   static_assert(ClassCapacity > 0);

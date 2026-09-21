@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "core/esc_registers.hpp"
 #include "core/libxr_type.hpp"
 
 namespace LibXR::EtherCAT
@@ -54,6 +55,21 @@ class EscPort
 
   virtual ErrorCode Read(uint16_t address, RawData data) = 0;
   virtual ErrorCode Write(uint16_t address, ConstRawData data) = 0;
+
+  /**
+   * Write the AL Event Mask (0x0204) the way this ESC needs it.
+   *
+   * Defaults to the ETG layout, a plain 16 bit field. A part whose silicon
+   * differs - a wider register, or bits outside the ETG layout that have to
+   * survive the write - overrides this, so the protocol core never has to know
+   * which device it is driving.
+   */
+  virtual ErrorCode WriteAleventMask(uint16_t mask)
+  {
+    const uint8_t bytes[2] = {static_cast<uint8_t>(mask & 0xFFU),
+                              static_cast<uint8_t>(mask >> 8U)};
+    return Write(EscRegister::AL_EVENT_MASK, ConstRawData(bytes, sizeof(bytes)));
+  }
 };
 
 }  // namespace LibXR::EtherCAT

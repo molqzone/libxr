@@ -65,13 +65,13 @@ enum class ObjectAccess : uint16_t
 constexpr ObjectAccess operator|(ObjectAccess left, ObjectAccess right)
 {
   return static_cast<ObjectAccess>(static_cast<uint16_t>(left) |
-                                    static_cast<uint16_t>(right));
+                                   static_cast<uint16_t>(right));
 }
 
 constexpr ObjectAccess operator&(ObjectAccess left, ObjectAccess right)
 {
   return static_cast<ObjectAccess>(static_cast<uint16_t>(left) &
-                                    static_cast<uint16_t>(right));
+                                   static_cast<uint16_t>(right));
 }
 
 constexpr bool HasAccess(ObjectAccess access, ObjectAccess required)
