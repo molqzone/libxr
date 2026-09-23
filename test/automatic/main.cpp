@@ -59,8 +59,6 @@ void test_read_port();
 void test_write_port();
 void test_write_stream();
 void test_message_runtime();
-void test_app_framework_application();
-void test_app_framework_hardware();
 void test_database();
 void test_logger();
 void test_terminal_input();
@@ -249,10 +247,6 @@ constexpr GroupedTestCase kMainTestCases[] = {
     {"control_tests", {"pid", &RunVoidEntry<test_pid>, false}},
 
     {"system_tests", {"ramfs", &RunVoidEntry<test_ramfs>, false}},
-    {"system_tests",
-     {"app_framework_application", &RunVoidEntry<test_app_framework_application>, false}},
-    {"system_tests",
-     {"app_framework_hardware", &RunVoidEntry<test_app_framework_hardware>, false}},
     {"system_tests", {"event", &RunVoidEntry<test_event>, false}},
     {"system_tests", {"message_topic", &RunVoidEntry<test_message_topic>, false}},
     {"system_tests", {"message_packet", &RunVoidEntry<test_message_packet>, false}},

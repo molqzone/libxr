@@ -86,8 +86,6 @@ add_executable(
   core/rw/write_stream/test_write_stream.cpp
   driver/uart/test_uart.cpp
   driver/timebase/test_timebase.cpp
-  middleware/app_framework/application/test_application.cpp
-  middleware/app_framework/hardware/test_hardware.cpp
   middleware/database/database/test_database.cpp
   middleware/database/raw/raw/test_linux_database_raw.cpp
   middleware/database/raw_sequential/test_linux_database_sequential.cpp

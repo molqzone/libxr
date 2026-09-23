@@ -1,6 +1,5 @@
 #pragma once
 
-#include "app_framework.hpp"
 #include "async.hpp"
 #include "database.hpp"
 #include "double_buffer.hpp"
