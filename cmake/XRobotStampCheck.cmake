@@ -3,7 +3,7 @@
 # Run in script mode:  cmake -DHEADERS="a.hpp|b.hpp" -P XRobotStampCheck.cmake
 #
 # xrobot_gen_main writes "// xrobot-stamp: config=<path> sha256=<hex>" and a matching
-# "lock=" line; paths are relative to the header. Hashes use LF line endings so
+# "lock=" line; paths are relative to the header (absolute when on another drive). Hashes use LF line endings so
 # Windows and Linux checkouts of the same file agree. Headers without a stamp
 # (hand-written entries, Module compile probes) are not checked.
 
@@ -26,7 +26,11 @@ foreach(_header IN LISTS _headers)
       continue()
     endif()
     set(_kind "${CMAKE_MATCH_1}")
-    set(_input "${_base}/${CMAKE_MATCH_2}")
+    if(IS_ABSOLUTE "${CMAKE_MATCH_2}")
+      set(_input "${CMAKE_MATCH_2}")
+    else()
+      set(_input "${_base}/${CMAKE_MATCH_2}")
+    endif()
     set(_expected "${CMAKE_MATCH_3}")
     if(NOT EXISTS "${_input}")
       message(FATAL_ERROR "[XRobot] ${_header} was generated from ${_input}, which no longer exists. Regenerate it with xrobot_gen_main.")
