@@ -262,6 +262,20 @@ if(_xr_modules_loaded)
     list(SORT _xr_module_deps)
     target_link_libraries(${PROJECT_NAME} PUBLIC ${_xr_module_deps})
   endif()
+
+  # Refuse to build from a generated entry whose config or lock changed after
+  # generation. Missing or unstamped headers (Module compile probes) are skipped.
+  if(NOT DEFINED XROBOT_MAIN_HEADERS)
+    get_filename_component(_xr_bsp_root "${XROBOT_MODULES_DIR}" DIRECTORY)
+    set(XROBOT_MAIN_HEADERS "${_xr_bsp_root}/User/xrobot_main.hpp")
+  endif()
+  string(REPLACE ";" "|" _xr_stamp_headers "${XROBOT_MAIN_HEADERS}")
+  add_custom_target(xrobot_stamp_check ALL
+    COMMAND ${CMAKE_COMMAND} "-DHEADERS=${_xr_stamp_headers}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/cmake/XRobotStampCheck.cmake"
+    COMMENT "Checking generated XRobot entry headers"
+    VERBATIM)
+  add_dependencies(${PROJECT_NAME} xrobot_stamp_check)
 endif()
 
 if(LIBXR_TEST_BUILD)
