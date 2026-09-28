@@ -248,11 +248,6 @@ if(XROBOT_MODULES_DIR)
   endif()
   include("${XROBOT_MODULES_DIR}/CMakeLists.txt")
 
-  # BSP toolchains may omit NDEBUG even in Release. Export the actual native
-  # build profile to the generated entry without changing global optimization.
-  target_compile_definitions(${PROJECT_NAME} PUBLIC
-    "XROBOT_OPTIMIZED_BUILD=$<IF:$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>,1,0>")
-
   get_property(_xr_module_deps GLOBAL PROPERTY XR_MODULE_DEPS)
   if(_xr_module_deps)
     list(REMOVE_DUPLICATES _xr_module_deps)
