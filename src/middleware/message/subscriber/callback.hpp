@@ -102,6 +102,14 @@ class Topic::Callback
                                            std::same_as<RemoveCVRef<T>, RawMessageView>;
 
   /**
+   * @brief 是否把可写 `RawData` 当成 payload 参数 / Whether one callback payload
+   *        argument is the writable `RawData` descriptor
+   * @tparam T 待判断的参数类型 / Argument type to inspect
+   */
+  template <typename T>
+  static constexpr bool IS_RAW_DATA = std::same_as<RemoveCVRef<T>, RawData>;
+
+  /**
    * @brief 是否把 payload 直接当成一个对象接收 / Whether one callback payload argument
    *        receives the payload directly as one object
    * @tparam T 待判断的参数类型 / Argument type to inspect
@@ -172,6 +180,10 @@ class Topic::Callback
     static_assert(!IS_MUTABLE_MESSAGE_VIEW_REF<PayloadArg>,
                   "LibXR::Topic::Callback does not accept MessageView<T>&; "
                   "use MessageView<T> or const MessageView<T>& instead.");
+    static_assert(!IS_RAW_DATA<PayloadArg>,
+                  "LibXR::Topic::Callback does not accept RawData as the payload; "
+                  "use the topic's payload type T (keeps the type check), or "
+                  "ConstRawData for raw bytes.");
 
     if constexpr (IS_RAW_DATA_VIEW<PayloadArg>)
     {
