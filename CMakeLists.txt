@@ -239,6 +239,24 @@ endif()
 if(XROBOT_MODULES_DIR)
   get_filename_component(_xr_bsp_root "${XROBOT_MODULES_DIR}" DIRECTORY)
 
+  # The entry header location is fixed; reject the removed per-BSP header list.
+  if(DEFINED XROBOT_MAIN_HEADERS)
+    message(
+      FATAL_ERROR
+        "[XRobot] XROBOT_MAIN_HEADERS is no longer supported. The generated entry is "
+        "always ${_xr_bsp_root}/User/xrobot_main.hpp; remove XROBOT_MAIN_HEADERS "
+        "from the BSP CMake."
+    )
+  endif()
+
+  # cmake_language(DEFER) below needs CMake 3.19.
+  if(CMAKE_VERSION VERSION_LESS 3.19)
+    message(
+      FATAL_ERROR
+        "[XRobot] XRobot integration requires CMake 3.19 or newer (found ${CMAKE_VERSION})."
+    )
+  endif()
+
   if(NOT EXISTS "${XROBOT_MODULES_DIR}/CMakeLists.txt")
     message(
       FATAL_ERROR
@@ -255,19 +273,108 @@ if(XROBOT_MODULES_DIR)
     target_link_libraries(${PROJECT_NAME} PUBLIC ${_xr_module_deps})
   endif()
 
-  # Refuse to build from a generated entry whose config or lock changed after
-  # generation. Missing or unstamped headers (Module compile probes) are skipped.
-  if(NOT DEFINED XROBOT_MAIN_HEADERS)
-    get_filename_component(_xr_bsp_root "${XROBOT_MODULES_DIR}" DIRECTORY)
-    set(XROBOT_MAIN_HEADERS "${_xr_bsp_root}/User/xrobot_main.hpp")
+  # User/xrobot_main.hpp names its inputs in "// xrobot:" lines: exactly one
+  # `config "<path>"` and one or more `depends "<path>"`. Paths are relative to the
+  # header directory unless absolute.
+  set(_xr_main_header "${_xr_bsp_root}/User/xrobot_main.hpp")
+  if(NOT EXISTS "${_xr_main_header}")
+    message(
+      FATAL_ERROR
+        "[XRobot] ${_xr_main_header} is missing. Run `xrobot setup` in ${_xr_bsp_root}, "
+        "or `xrobot gen -c <config>` there to select a product."
+    )
   endif()
-  string(REPLACE ";" "|" _xr_stamp_headers "${XROBOT_MAIN_HEADERS}")
-  add_custom_target(xrobot_stamp_check ALL
-    COMMAND ${CMAKE_COMMAND} "-DHEADERS=${_xr_stamp_headers}"
-            -P "${CMAKE_CURRENT_LIST_DIR}/cmake/XRobotStampCheck.cmake"
-    COMMENT "Checking generated XRobot entry headers"
-    VERBATIM)
-  add_dependencies(${PROJECT_NAME} xrobot_stamp_check)
+  set_property(
+    DIRECTORY
+    APPEND
+    PROPERTY CMAKE_CONFIGURE_DEPENDS "${_xr_main_header}"
+  )
+
+  get_filename_component(_xr_main_header_dir "${_xr_main_header}" DIRECTORY)
+  file(STRINGS "${_xr_main_header}" _xr_directives REGEX "^// xrobot:")
+  set(_xr_config "")
+  set(_xr_depends "")
+  foreach(_xr_directive IN LISTS _xr_directives)
+    if(NOT _xr_directive MATCHES "^// xrobot: (config|depends) \"([^\"]+)\"$")
+      message(
+        FATAL_ERROR "[XRobot] ${_xr_main_header}: unrecognized line: ${_xr_directive}"
+      )
+    endif()
+    set(_xr_kind "${CMAKE_MATCH_1}")
+    set(_xr_path "${CMAKE_MATCH_2}")
+    if(NOT IS_ABSOLUTE "${_xr_path}")
+      set(_xr_path "${_xr_main_header_dir}/${_xr_path}")
+    endif()
+    get_filename_component(_xr_path "${_xr_path}" ABSOLUTE)
+    if(_xr_kind STREQUAL "config")
+      if(NOT _xr_config STREQUAL "")
+        message(FATAL_ERROR "[XRobot] ${_xr_main_header}: more than one config line.")
+      endif()
+      set(_xr_config "${_xr_path}")
+    else()
+      list(APPEND _xr_depends "${_xr_path}")
+    endif()
+  endforeach()
+  if(_xr_config STREQUAL "")
+    message(
+      FATAL_ERROR
+        "[XRobot] ${_xr_main_header}: missing `// xrobot: config` line. "
+        "Run `xrobot gen -c <config>` in ${_xr_bsp_root}."
+    )
+  endif()
+  if(NOT _xr_depends)
+    message(
+      FATAL_ERROR
+        "[XRobot] ${_xr_main_header}: missing `// xrobot: depends` line. "
+        "Run `xrobot gen -c <config>` in ${_xr_bsp_root}."
+    )
+  endif()
+
+  file(RELATIVE_PATH _xr_config_arg "${_xr_bsp_root}" "${_xr_config}")
+  message(STATUS "XRobot product: ${_xr_config_arg}")
+
+  # Every build compares file times before compiling xr. It reports, never regenerates.
+  string(REPLACE ";" "|" _xr_inputs "${_xr_config};${_xr_depends}")
+  add_custom_target(
+    xrobot_freshness_check ALL
+    COMMAND
+      ${CMAKE_COMMAND} "-DXROBOT_MAIN_HEADER=${_xr_main_header}"
+      "-DXROBOT_BSP_ROOT=${_xr_bsp_root}" "-DXROBOT_CONFIG=${_xr_config_arg}"
+      "-DXROBOT_INPUTS=${_xr_inputs}" -P
+      "${CMAKE_CURRENT_LIST_DIR}/cmake/XRobotFreshness.cmake"
+    COMMENT "Checking that the generated XRobot entry is up to date"
+    VERBATIM
+  )
+  add_dependencies(${PROJECT_NAME} xrobot_freshness_check)
+
+  # After each build of the top-level executable (STM32 CubeMX BSPs name it
+  # ${CMAKE_PROJECT_NAME}), print the product it was built for. The target may be
+  # created after this point, so the check runs at the end of the top-level directory.
+  # CMake attaches POST_BUILD commands only in the directory that created the target.
+  function(_xrobot_report_product product)
+    if(NOT TARGET "${CMAKE_PROJECT_NAME}")
+      return()
+    endif()
+    get_target_property(_xr_type "${CMAKE_PROJECT_NAME}" TYPE)
+    get_target_property(_xr_source_dir "${CMAKE_PROJECT_NAME}" SOURCE_DIR)
+    if(_xr_type STREQUAL "EXECUTABLE" AND _xr_source_dir STREQUAL "${CMAKE_SOURCE_DIR}")
+      add_custom_command(
+        TARGET "${CMAKE_PROJECT_NAME}"
+        POST_BUILD
+        COMMAND
+          ${CMAKE_COMMAND} -E echo
+          "$<TARGET_FILE_NAME:${CMAKE_PROJECT_NAME}> built for product: ${product}"
+        VERBATIM
+      )
+    endif()
+  endfunction()
+  get_filename_component(_xr_product "${_xr_config}" NAME_WLE)
+  # Deferred call arguments are evaluated when the call runs; bind the value now.
+  cmake_language(
+    EVAL
+    CODE
+    "cmake_language(DEFER DIRECTORY [[${CMAKE_SOURCE_DIR}]] CALL _xrobot_report_product [[${_xr_product}]])"
+  )
 endif()
 
 if(LIBXR_TEST_BUILD)
