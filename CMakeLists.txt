@@ -235,22 +235,19 @@ else()
   target_compile_definitions(${PROJECT_NAME} PUBLIC EIGEN_NO_IO)
 endif()
 
-set(_xr_modules_loaded FALSE)
+# XRobot integration. A BSP enables it by setting XROBOT_MODULES_DIR to <BSP root>/Modules.
 if(XROBOT_MODULES_DIR)
-  if(EXISTS "${XROBOT_MODULES_DIR}/CMakeLists.txt")
-    include("${XROBOT_MODULES_DIR}/CMakeLists.txt")
-    set(_xr_modules_loaded TRUE)
-  else()
-    file(GLOB _xr_nested_module_lists
-      "${XROBOT_MODULES_DIR}/*/CMakeLists.txt")
-    foreach(_xr_module_list IN LISTS _xr_nested_module_lists)
-      include("${_xr_module_list}")
-      set(_xr_modules_loaded TRUE)
-    endforeach()
-  endif()
-endif()
+  get_filename_component(_xr_bsp_root "${XROBOT_MODULES_DIR}" DIRECTORY)
 
-if(_xr_modules_loaded)
+  if(NOT EXISTS "${XROBOT_MODULES_DIR}/CMakeLists.txt")
+    message(
+      FATAL_ERROR
+        "[XRobot] ${XROBOT_MODULES_DIR}/CMakeLists.txt is missing. "
+        "Run `xrobot setup` in ${_xr_bsp_root}."
+    )
+  endif()
+  include("${XROBOT_MODULES_DIR}/CMakeLists.txt")
+
   # BSP toolchains may omit NDEBUG even in Release. Export the actual native
   # build profile to the generated entry without changing global optimization.
   target_compile_definitions(${PROJECT_NAME} PUBLIC
