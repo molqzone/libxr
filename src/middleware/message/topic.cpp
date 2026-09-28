@@ -4,6 +4,7 @@
 
 #include "crc.hpp"
 #include "libxr_def.hpp"
+#include "libxr_rw.hpp"
 #include "mutex.hpp"
 
 using namespace LibXR;
@@ -133,13 +134,11 @@ Topic::Topic(const char* name, TypeID::ID payload_type_id, size_t payload_size,
 
   if (topic)
   {
-    ASSERT(topic->data_.payload_type_id == payload_type_id);
-    ASSERT(topic->data_.payload_size == payload_size);
-    ASSERT(topic->data_.payload_alignment == payload_alignment);
+    RequireTypeContract(topic, name, payload_type_id, payload_size, payload_alignment);
 
-    if (multi_publisher && !topic->data_.mutex)
+    if (multi_publisher)
     {
-      ASSERT(false);
+      RequireMultiPublisher(topic, name);
     }
 
     block_ = topic;
@@ -168,6 +167,72 @@ Topic::Topic(const char* name, TypeID::ID payload_type_id, size_t payload_size,
 }
 
 Topic::Topic(TopicHandle topic) : block_(topic) {}
+
+void Topic::RequireTypeContract(TopicHandle topic, const char* name,
+                                TypeID::ID payload_type_id, size_t payload_size,
+                                size_t payload_alignment)
+{
+  const auto& data = topic->data_;
+  if (data.payload_type_id == payload_type_id && data.payload_size == payload_size &&
+      data.payload_alignment == payload_alignment)
+  {
+    return;
+  }
+
+  if (STDIO::write_ && STDIO::write_->Writable())
+  {
+    if (name != nullptr)
+    {
+      STDIO::Print<
+          "Topic type mismatch: topic \"{}\" (key {}) carries {} bytes align {}, "
+          "requested {} bytes align {}\r\n">(
+          name, data.crc32, data.payload_size, data.payload_alignment,
+          static_cast<uint32_t>(payload_size), static_cast<uint32_t>(payload_alignment));
+    }
+    else
+    {
+      STDIO::Print<
+          "Topic type mismatch: topic key {} carries {} bytes align {}, "
+          "requested {} bytes align {}\r\n">(
+          data.crc32, data.payload_size, data.payload_alignment,
+          static_cast<uint32_t>(payload_size), static_cast<uint32_t>(payload_alignment));
+    }
+  }
+  REQUIRE(false);
+}
+
+void Topic::RequireCallbackType(TopicHandle topic, TypeID::ID payload_type_id)
+{
+  const auto& data = topic->data_;
+  if (data.payload_type_id == payload_type_id)
+  {
+    return;
+  }
+
+  if (STDIO::write_ && STDIO::write_->Writable())
+  {
+    STDIO::Print<
+        "Topic type mismatch: callback payload type differs from topic key {} "
+        "({} bytes align {})\r\n">(data.crc32, data.payload_size, data.payload_alignment);
+  }
+  REQUIRE(false);
+}
+
+void Topic::RequireMultiPublisher(TopicHandle topic, const char* name)
+{
+  if (topic->data_.mutex != nullptr)
+  {
+    return;
+  }
+
+  if (STDIO::write_ && STDIO::write_->Writable())
+  {
+    STDIO::Print<
+        "Topic publisher mismatch: topic \"{}\" (key {}) was created for a single "
+        "publisher, multi_publisher requested\r\n">(name, topic->data_.crc32);
+  }
+  REQUIRE(false);
+}
 
 Topic::TopicHandle Topic::Find(const char* name, Domain* domain)
 {

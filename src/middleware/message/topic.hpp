@@ -339,6 +339,11 @@ class Topic
    * @param domain 可选主题域 / Optional topic domain
    * @param multi_publisher 是否允许多发布者串行化 / Whether to allow serialized
    * multi-publisher use
+   * @note 同名 topic 已存在但类型契约不同，或它以单发布者创建而本次要求多发布者时，
+   *       在所有构建类型中进入致命错误。
+   *       If a topic with this name exists with a different type contract, or was
+   *       created for a single publisher while multi_publisher is requested, a fatal
+   *       error is raised in every build type.
    */
   Topic(const char* name, TypeID::ID payload_type_id, size_t payload_size,
         size_t payload_alignment, Domain* domain = nullptr, bool multi_publisher = false);
@@ -386,6 +391,9 @@ class Topic
    * @param multi_publisher 是否允许多发布者串行化 / Whether to allow serialized
    *        multi-publisher use
    * @return topic 句柄 / Topic handle
+   * @note 已有 topic 的冲突检查与构造函数相同，在所有构建类型中生效。
+   *       Conflicts with an existing topic are checked as in the constructor, in every
+   *       build type.
    */
   template <typename Data>
   static TopicHandle FindOrCreate(const char* name, Domain* domain = nullptr,
@@ -395,10 +403,11 @@ class Topic
     auto topic = Find(name, domain);
     if (topic != nullptr)
     {
-      CheckSubscriberType<Data>(Topic(topic));
-      if (multi_publisher && !topic->data_.mutex)
+      RequireTypeContract(topic, name, TypeID::GetID<Data>(), sizeof(Data),
+                          alignof(Data));
+      if (multi_publisher)
       {
-        ASSERT(false);
+        RequireMultiPublisher(topic, name);
       }
     }
     else
@@ -644,20 +653,67 @@ class Topic
   }
 
   /**
-   * @brief 断言订阅者看到的精确 payload 类型与 topic 契约一致 / Assert that the exact
+   * @brief 检查订阅者看到的精确 payload 类型与 topic 契约一致 / Check that the exact
    *        payload type seen by a subscriber matches the topic contract
    * @tparam Data 订阅类型 / Subscriber payload type
    * @param topic 目标 topic 视图 / Target topic view
+   * @note 类型检查在所有构建类型中生效，见 `RequireTypeContract()`。
+   *       The type check is active in every build type; see `RequireTypeContract()`.
    */
   template <typename Data>
   static void CheckSubscriberType(Topic topic)
   {
     CheckTopicPayload<Data>();
     ASSERT(topic.block_ != nullptr);
-    ASSERT(topic.block_->data_.payload_type_id == TypeID::GetID<Data>());
-    ASSERT(topic.block_->data_.payload_size == sizeof(Data));
-    ASSERT(topic.block_->data_.payload_alignment == alignof(Data));
+    RequireTypeContract(topic.block_, nullptr, TypeID::GetID<Data>(), sizeof(Data),
+                        alignof(Data));
   }
+
+  /**
+   * @brief 初始化期检查 topic 类型契约，在所有构建类型中生效 / Check one topic type
+   *        contract at initialization time, active in every build type
+   * @param topic 目标 topic 句柄 / Target topic handle
+   * @param name topic 名称；调用方没有名称时为空 / Topic name; null when the caller does
+   *        not have it
+   * @param payload_type_id 调用方要求的精确 payload 类型标识 / Exact payload type ID
+   *        required by the caller
+   * @param payload_size 调用方要求的 payload 字节数 / Payload size required by the
+   *        caller
+   * @param payload_alignment 调用方要求的 payload 对齐 / Payload alignment required by
+   *        the caller
+   * @note 不一致时打印 topic 名称（若有）、CRC32 键和双方的字节数与对齐，然后进入致命
+   *       错误。
+   *       On mismatch, prints the topic name (when given), its CRC32 key, and both
+   *       sizes and alignments, then raises a fatal error.
+   */
+  static void RequireTypeContract(TopicHandle topic, const char* name,
+                                  TypeID::ID payload_type_id, size_t payload_size,
+                                  size_t payload_alignment);
+
+  /**
+   * @brief 初始化期检查回调 payload 类型，在所有构建类型中生效 / Check one callback
+   *        payload type at initialization time, active in every build type
+   * @param topic 目标 topic 句柄 / Target topic handle
+   * @param payload_type_id 回调要求的精确 payload 类型标识 / Exact payload type ID
+   *        required by the callback
+   * @note 回调只记录类型标识；不一致时打印 topic 的 CRC32 键与 payload 字节数和对齐，
+   *       然后进入致命错误。
+   *       A callback records only its type ID; on mismatch, prints the topic CRC32 key
+   *       and the topic payload size and alignment, then raises a fatal error.
+   */
+  static void RequireCallbackType(TopicHandle topic, TypeID::ID payload_type_id);
+
+  /**
+   * @brief 初始化期检查已有 topic 能否多发布者使用，在所有构建类型中生效 / Check at
+   *        initialization time that one existing topic allows multiple publishers,
+   *        active in every build type
+   * @param topic 目标 topic 句柄 / Target topic handle
+   * @param name topic 名称 / Topic name
+   * @note 该 topic 以单发布者创建时打印名称与 CRC32 键，然后进入致命错误。
+   *       If the topic was created for a single publisher, prints its name and CRC32
+   *       key, then raises a fatal error.
+   */
+  static void RequireMultiPublisher(TopicHandle topic, const char* name);
 
   /**
    * @brief 为订阅者分配一个长期存在的本地接收对象 / Allocate one long-lived local

@@ -39,6 +39,7 @@ void test_object_pool();
 void test_linux_stdio_print();
 void test_message_packet();
 void test_message_topic();
+void test_message_topic_contract();
 void test_queue();
 void test_spsc_queue();
 void test_spsc_prefix();
@@ -249,6 +250,8 @@ constexpr GroupedTestCase kMainTestCases[] = {
     {"system_tests", {"ramfs", &RunVoidEntry<test_ramfs>, false}},
     {"system_tests", {"event", &RunVoidEntry<test_event>, false}},
     {"system_tests", {"message_topic", &RunVoidEntry<test_message_topic>, false}},
+    {"system_tests",
+     {"message_topic_contract", &RunVoidEntry<test_message_topic_contract>, true, false}},
     {"system_tests", {"message_packet", &RunVoidEntry<test_message_packet>, false}},
     {"system_tests", {"database", &RunVoidEntry<test_database>, false}},
     {"linux_host_tests",

@@ -614,12 +614,15 @@ struct Topic::CallbackBlock : public Topic::SuberBlock
  * dynamic allocation; callback subscriptions are expected to be long-lived
  * @note 回调在发布锁内运行，不应重入发布同一个主题 / The callback runs while the publish
  * lock is held and should not re-enter publishing on the same topic
+ * @note 类型化回调的 payload 类型与 topic 不一致时，在所有构建类型中进入致命错误 /
+ * A typed callback whose payload type differs from the topic raises a fatal error in
+ * every build type
  */
 inline void Topic::RegisterCallback(Callback& cb)
 {
   if (!cb.IsRawPayloadView())
   {
-    ASSERT(block_->data_.payload_type_id == cb.PayloadTypeID());
+    RequireCallbackType(block_, cb.PayloadTypeID());
   }
 
   auto node = new (std::align_val_t(LibXR::CONCURRENCY_ALIGNMENT))
