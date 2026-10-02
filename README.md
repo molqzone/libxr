@@ -8,7 +8,7 @@ Want to be the best embedded framework
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 [![Documentation](https://img.shields.io/badge/docs-online-brightgreen)](https://xrobot.work/libxr/)
-[![GitHub Issues](https://img.shields.io/github/issues/Jiu-xiao/libxr)](https://github.com/xrobot-org/libxr/issues)
+[![GitHub Issues](https://img.shields.io/github/issues/xrobot-org/libxr)](https://github.com/xrobot-org/libxr/issues)
 [![C/C++ CI](https://github.com/xrobot-org/libxr/actions/workflows/check.yml/badge.svg)](https://github.com/xrobot-org/libxr/actions/workflows/check.yml)
 [![Generate and Deploy Doxygen Docs](https://github.com/xrobot-org/libxr/actions/workflows/doxygen.yml/badge.svg)](https://github.com/xrobot-org/libxr/actions/workflows/doxygen.yml)
 [![CI/CD - Python Package](https://github.com/xrobot-org/LibXR_CppCodeGenerator/actions/workflows/python-publish.yml/badge.svg)](https://github.com/xrobot-org/LibXR_CppCodeGenerator/actions/workflows/python-publish.yml)
