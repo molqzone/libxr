@@ -403,11 +403,10 @@ class Topic
     auto topic = Find(name, domain);
     if (topic != nullptr)
     {
-      RequireTypeContract(topic, name, TypeID::GetID<Data>(), sizeof(Data),
-                          alignof(Data));
+      RequireTypeContract(topic, TypeID::GetID<Data>(), sizeof(Data), alignof(Data));
       if (multi_publisher)
       {
-        RequireMultiPublisher(topic, name);
+        RequireMultiPublisher(topic);
       }
     }
     else
@@ -665,30 +664,25 @@ class Topic
   {
     CheckTopicPayload<Data>();
     ASSERT(topic.block_ != nullptr);
-    RequireTypeContract(topic.block_, nullptr, TypeID::GetID<Data>(), sizeof(Data),
-                        alignof(Data));
+    RequireTypeContract(topic.block_, TypeID::GetID<Data>(), sizeof(Data), alignof(Data));
   }
 
   /**
    * @brief 初始化期检查 topic 类型契约，在所有构建类型中生效 / Check one topic type
    *        contract at initialization time, active in every build type
    * @param topic 目标 topic 句柄 / Target topic handle
-   * @param name topic 名称；调用方没有名称时为空 / Topic name; null when the caller does
-   *        not have it
    * @param payload_type_id 调用方要求的精确 payload 类型标识 / Exact payload type ID
    *        required by the caller
    * @param payload_size 调用方要求的 payload 字节数 / Payload size required by the
    *        caller
    * @param payload_alignment 调用方要求的 payload 对齐 / Payload alignment required by
    *        the caller
-   * @note 不一致时打印 topic 名称（若有）、CRC32 键和双方的字节数与对齐，然后进入致命
-   *       错误。
-   *       On mismatch, prints the topic name (when given), its CRC32 key, and both
-   *       sizes and alignments, then raises a fatal error.
+   * @note 不一致时断言失败并进入致命错误；topic 句柄和两边的类型标识可在栈帧中查看。
+   *       On mismatch, the assertion fails and raises a fatal error; the topic handle
+   *       and both type IDs can be inspected in the stack frames.
    */
-  static void RequireTypeContract(TopicHandle topic, const char* name,
-                                  TypeID::ID payload_type_id, size_t payload_size,
-                                  size_t payload_alignment);
+  static void RequireTypeContract(TopicHandle topic, TypeID::ID payload_type_id,
+                                  size_t payload_size, size_t payload_alignment);
 
   /**
    * @brief 初始化期检查回调 payload 类型，在所有构建类型中生效 / Check one callback
@@ -696,10 +690,9 @@ class Topic
    * @param topic 目标 topic 句柄 / Target topic handle
    * @param payload_type_id 回调要求的精确 payload 类型标识 / Exact payload type ID
    *        required by the callback
-   * @note 回调只记录类型标识；不一致时打印 topic 的 CRC32 键与 payload 字节数和对齐，
-   *       然后进入致命错误。
-   *       A callback records only its type ID; on mismatch, prints the topic CRC32 key
-   *       and the topic payload size and alignment, then raises a fatal error.
+   * @note 不一致时断言失败并进入致命错误；topic 句柄和两边的类型标识可在栈帧中查看。
+   *       On mismatch, the assertion fails and raises a fatal error; the topic handle
+   *       and both type IDs can be inspected in the stack frames.
    */
   static void RequireCallbackType(TopicHandle topic, TypeID::ID payload_type_id);
 
@@ -708,12 +701,11 @@ class Topic
    *        initialization time that one existing topic allows multiple publishers,
    *        active in every build type
    * @param topic 目标 topic 句柄 / Target topic handle
-   * @param name topic 名称 / Topic name
-   * @note 该 topic 以单发布者创建时打印名称与 CRC32 键，然后进入致命错误。
-   *       If the topic was created for a single publisher, prints its name and CRC32
-   *       key, then raises a fatal error.
+   * @note 该 topic 以单发布者创建时断言失败并进入致命错误。
+   *       If the topic was created for a single publisher, the assertion fails and
+   *       raises a fatal error.
    */
-  static void RequireMultiPublisher(TopicHandle topic, const char* name);
+  static void RequireMultiPublisher(TopicHandle topic);
 
   /**
    * @brief 为订阅者分配一个长期存在的本地接收对象 / Allocate one long-lived local
