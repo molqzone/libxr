@@ -108,9 +108,23 @@ ErrorCode STM32Flash::Erase(size_t offset, size_t size)
 
   FlashOperationGuard operation;
 
+  // 表按地址排列；bank_entries 记录每个 bank 中已经走过的表项数，即下一项在该 bank 内的
+  // 序号。bank 2 的起点由表给出，小容量型号上它与 bank 1 之间可能有空洞（如 H743xG 在
+  // 0x08100000，G474xC 在 0x08040000）。
+  // The table is ordered by address; bank_entries counts the entries already passed in
+  // each bank, which is the next entry's number within that bank. The table gives where
+  // bank 2 starts, after a gap on smaller parts (H743xG at 0x08100000, G474xC at
+  // 0x08040000).
+  uint32_t bank_entries[2] = {0U, 0U};
   for (size_t i = 0; i < sector_count_; ++i)
   {
     const auto& sector = sectors_[i];
+#if defined(FLASH_BANK_2)
+    const size_t bank_slot = (STM32FlashBankOf(sector.address) == FLASH_BANK_2) ? 1U : 0U;
+#else
+    const size_t bank_slot = 0U;
+#endif
+    [[maybe_unused]] const uint32_t number_in_bank = bank_entries[bank_slot]++;
     if (sector.address + sector.size <= start_addr)
     {
       continue;
@@ -122,18 +136,25 @@ ErrorCode STM32Flash::Erase(size_t offset, size_t size)
     FLASH_EraseInitTypeDef erase_init = {};
 
 #if defined(FLASH_TYPEERASE_PAGES) && defined(FLASH_PAGE_SIZE)  // STM32F1/G4... series
+    // 有 Page 字段的系列（G0、G4、L4、L5、U5 等）按 bank 内页号编号；其余系列用页地址。
+    // Families with a Page field (G0, G4, L4, L5, U5, ...) number pages within each
+    // bank; the others take the page address.
     erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
-    SetNbPages(erase_init, sector.address, i);
+    SetNbPages(erase_init, sector.address, number_in_bank);
     erase_init.NbPages = 1;
     SetBanks(erase_init, sector.address);
 #elif defined(FLASH_TYPEERASE_SECTORS)  // STM32F4/F7/H7... series
     erase_init.TypeErase = FLASH_TYPEERASE_SECTORS;
-#if defined(FLASH_SECTOR_TOTAL)
-    erase_init.Sector = static_cast<uint32_t>(i) % FLASH_SECTOR_TOTAL;
-#elif defined(FLASH_SECTOR_NB)
-    erase_init.Sector = static_cast<uint32_t>(i) % FLASH_SECTOR_NB;
+#if defined(FLASH_SECTOR_SIZE)
+    // H5、H7 的扇区大小一致，按 bank 内扇区号编号。
+    // H5 and H7 have uniform sectors numbered within each bank.
+    erase_init.Sector = number_in_bank;
+#elif defined(FLASH_SECTOR_TOTAL)
+    // F2、F4、F7 的扇区号跨两个 bank 连续编号，等于表中的序号。
+    // F2, F4 and F7 number sectors across both banks, as the table index does.
+    erase_init.Sector = static_cast<uint32_t>(i);
 #else
-#error "No supported Flash sector count defined"
+#error "No supported Flash sector numbering defined"
 #endif
     erase_init.NbSectors = 1;
 #if defined(FLASH_BANK_1)

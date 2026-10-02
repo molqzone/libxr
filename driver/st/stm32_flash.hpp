@@ -109,6 +109,14 @@ typename std::enable_if<HasFlashBank<T>::value>::type SetBanks(T& init, uint32_t
  * Flash。 Related caches are temporarily disabled during erase/program operations. Once
  * the operation starts, success and failure returns restore the original cache enable
  * state and lock Flash.
+ * @note 扇区表须从 Flash 起始地址开始、按地址列出整片 Flash 的每个扇区或页。擦除时按地址
+ * 判断所在 bank，H5、H7 和使用 Page 字段的系列按 bank 内序号擦除，F2/F4/F7 按跨 bank 的
+ * 扇区号擦除。不支持 bank 交换（SWAP_BANK、BFB2 等选项字节）。
+ * The sector table must list every sector or page of the whole Flash in address order,
+ * starting at the Flash base. Erase takes the bank from the address; H5, H7 and the
+ * families with a Page field erase by the number within the bank, F2/F4/F7 by the sector
+ * number across both banks. Bank swap (SWAP_BANK, BFB2 and similar option bytes) is not
+ * supported.
  */
 class STM32Flash : public Flash
 {
