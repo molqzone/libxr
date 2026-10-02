@@ -23,13 +23,13 @@ template <typename Derived, typename Data>
 class QueueTypedBase
 {
  public:
-  using ValueType = Data;  ///< 队列元素类型。 Queue element type.
+  using ValueType = Data;  ///< 队列元素类型 / Queue element type.
 
   /**
    * @brief 推入一个强类型元素。
    * @brief Push one typed element.
-   * @param item 待入队元素。 Element to enqueue.
-   * @return 底层字节队列返回的操作结果。 Operation result returned by the byte queue.
+   * @param item 待入队元素 / Element to enqueue.
+   * @return 底层字节队列返回的操作结果 / Operation result returned by the byte queue.
    */
   ErrorCode Push(const Data& item)
   {
@@ -39,15 +39,15 @@ class QueueTypedBase
   /**
    * @brief 弹出一个强类型元素。
    * @brief Pop one typed element.
-   * @param item 用于接收出队元素的引用。 Reference receiving the dequeued element.
-   * @return 底层字节队列返回的操作结果。 Operation result returned by the byte queue.
+   * @param item 用于接收出队元素的引用 / Reference receiving the dequeued element.
+   * @return 底层字节队列返回的操作结果 / Operation result returned by the byte queue.
    */
   ErrorCode Pop(Data& item) { return static_cast<Derived*>(this)->PopBytes(&item); }
 
   /**
    * @brief 丢弃一个队头元素。
    * @brief Discard one front element.
-   * @return 底层字节队列返回的操作结果。 Operation result returned by the byte queue.
+   * @return 底层字节队列返回的操作结果 / Operation result returned by the byte queue.
    */
   ErrorCode Pop() { return static_cast<Derived*>(this)->PopBytes(nullptr); }
 };

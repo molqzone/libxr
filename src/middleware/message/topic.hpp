@@ -60,11 +60,11 @@ class Topic
    */
   enum class LockState : uint32_t
   {
-    UNLOCKED = 0,  ///< 当前未持有发布锁。The publish path is currently unlocked.
-    LOCKED = 1,  ///< 当前通过原子快路径持有发布权。The publish path is locked through the
-                 ///< atomic fast path.
-    USE_MUTEX = UINT32_MAX  ///< 当前主题改走互斥量串行化。This topic currently serializes
-                            ///< publishers through a mutex.
+    UNLOCKED = 0,  ///< 当前未持有发布锁 / The publish path is currently unlocked.
+    LOCKED = 1,    ///< 当前通过原子快路径持有发布权 / The publish path is locked through
+                   ///< the atomic fast path.
+    USE_MUTEX = UINT32_MAX  ///< 当前主题改走互斥量串行化 / This topic currently
+                            ///< serializes publishers through a mutex.
   };
 
  public:
@@ -81,16 +81,16 @@ class Topic
   struct Block
   {
     std::atomic<LockState>
-        busy;             ///< 发布路径串行化状态。Publish-path serialization state.
-    LockFreeList subers;  ///< 已挂接订阅者链表。List of attached subscribers.
+        busy;             ///< 发布路径串行化状态 / Publish-path serialization state.
+    LockFreeList subers;  ///< 已挂接订阅者链表 / List of attached subscribers.
     TypeID::ID
-        payload_type_id;    ///< 精确 payload 类型标识。Exact payload type identifier.
-    uint32_t payload_size;  ///< 该 topic 固定 payload 字节数。Fixed payload size in bytes
-                            ///< of this topic.
-    uint32_t payload_alignment;  ///< 该 topic payload 所需对齐。Required payload
+        payload_type_id;    ///< 精确 payload 类型标识 / Exact payload type identifier.
+    uint32_t payload_size;  ///< 该 topic 固定 payload 字节数 / Fixed payload size in
+                            ///< bytes of this topic.
+    uint32_t payload_alignment;  ///< 该 topic payload 所需对齐 / Required payload
                                  ///< alignment of this topic.
-    uint32_t crc32;              ///< 主题名 CRC32 键。CRC32 key of the topic name.
-    Mutex* mutex;  ///< 多发布者主题使用的互斥量。Mutex used by multi-publisher topics.
+    uint32_t crc32;              ///< 主题名 CRC32 键 / CRC32 key of the topic name.
+    Mutex* mutex;  ///< 多发布者主题使用的互斥量 / Mutex used by multi-publisher topics.
   };
 
 #ifndef __DOXYGEN__
@@ -109,11 +109,11 @@ class Topic
   template <typename Data>
   class PackedData;
   static constexpr uint8_t PACKET_PREFIX =
-      0x5A;  ///< 打包消息前缀字节。Packed-message prefix byte.
+      0x5A;  ///< 打包消息前缀字节 / Packed-message prefix byte.
   static constexpr uint8_t PACKET_VERSION =
-      0x01;  ///< 打包消息协议版本。Packed-message protocol version.
+      0x01;  ///< 打包消息协议版本 / Packed-message protocol version.
   static constexpr size_t PACK_BASE_SIZE =
-      17;  ///< 固定非 payload 开销：16 字节头 + 1 字节尾 CRC8。Fixed non-payload
+      17;  ///< 固定非 payload 开销：16 字节头 + 1 字节尾 CRC8 / Fixed non-payload
            ///< overhead: 16-byte header plus 1-byte trailing CRC8.
 #endif
 
@@ -134,8 +134,8 @@ class Topic
   struct MessageView
   {
     static_assert(TopicPayload<Data>);
-    MicrosecondTimestamp timestamp;  ///< 消息时间戳。Message timestamp.
-    Data* data;  ///< 指向本次发布 payload 对象的指针。Pointer to the payload object of
+    MicrosecondTimestamp timestamp;  ///< 消息时间戳 / Message timestamp.
+    Data* data;  ///< 指向本次发布 payload 对象的指针 / Pointer to the payload object of
                  ///< this publish.
   };
 
@@ -152,8 +152,8 @@ class Topic
    */
   struct RawMessageView
   {
-    MicrosecondTimestamp timestamp;  ///< 消息时间戳。Message timestamp.
-    ConstRawData payload;  ///< 本次发布 payload 的只读字节视图。Read-only byte view of
+    MicrosecondTimestamp timestamp;  ///< 消息时间戳 / Message timestamp.
+    ConstRawData payload;  ///< 本次发布 payload 的只读字节视图 / Read-only byte view of
                            ///< this publish payload.
   };
 
@@ -167,8 +167,8 @@ class Topic
   struct Message
   {
     static_assert(TopicPayload<Data>);
-    MicrosecondTimestamp timestamp;  ///< 消息时间戳。Message timestamp.
-    Data data;                       ///< payload 对象副本。Copied payload object.
+    MicrosecondTimestamp timestamp;  ///< 消息时间戳 / Message timestamp.
+    Data data;                       ///< payload 对象副本 / Copied payload object.
   };
 
   /**
@@ -213,7 +213,7 @@ class Topic
     Domain(const char* name);
 
     RBTree<uint32_t>::Node<RBTree<uint32_t>>*
-        node_;  ///< 该域在全局域表里的节点。This domain's node inside the global domain
+        node_;  ///< 该域在全局域表里的节点 / This domain's node inside the global domain
                 ///< tree.
   };
 
@@ -223,10 +223,10 @@ class Topic
    */
   enum class SuberType : uint8_t
   {
-    SYNC,      ///< 同步等待型订阅者。Synchronous wait-based subscriber.
-    ASYNC,     ///< 异步本地缓冲型订阅者。Asynchronous local-buffer subscriber.
-    QUEUE,     ///< 队列转发型订阅者。Queue-forwarding subscriber.
-    CALLBACK,  ///< 回调执行型订阅者。Callback-executing subscriber.
+    SYNC,      ///< 同步等待型订阅者 / Synchronous wait-based subscriber.
+    ASYNC,     ///< 异步本地缓冲型订阅者 / Asynchronous local-buffer subscriber.
+    QUEUE,     ///< 队列转发型订阅者 / Queue-forwarding subscriber.
+    CALLBACK,  ///< 回调执行型订阅者 / Callback-executing subscriber.
   };
 
   /**
@@ -235,7 +235,7 @@ class Topic
    */
   struct SuberBlock
   {
-    SuberType type;  ///< 订阅块的具体种类。Concrete kind of this subscriber block.
+    SuberType type;  ///< 订阅块的具体种类 / Concrete kind of this subscriber block.
   };
 
   /**
@@ -616,12 +616,12 @@ class Topic
   uint32_t GetKey() const;
 
  private:
-  TopicHandle block_ = nullptr;  ///< 当前 topic 视图绑定的状态块。Runtime state block
+  TopicHandle block_ = nullptr;  ///< 当前 topic 视图绑定的状态块 / Runtime state block
                                  ///< bound to the current topic view.
 
   static inline RBTree<uint32_t>* domain_ =
-      nullptr;  ///< 全局 topic 域注册表。Global registry of topic domains.
-  static inline Domain* def_domain_ = nullptr;  ///< 缺省 topic 域。Default topic domain.
+      nullptr;  ///< 全局 topic 域注册表 / Global registry of topic domains.
+  static inline Domain* def_domain_ = nullptr;  ///< 缺省 topic 域 / Default topic domain.
 
   /**
    * @brief 确保全局域注册表已创建 / Ensure the global domain registry exists

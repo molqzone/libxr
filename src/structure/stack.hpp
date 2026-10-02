@@ -12,9 +12,10 @@ namespace LibXR
  * @brief 线程安全的栈数据结构 / Thread-safe stack data structure
  *
  * 该类实现了一个基于数组的线程安全栈，支持基本的 `Push`、`Pop`、`Peek`
- * 等操作，并使用互斥锁 (`Mutex`) 保护数据安全。 This class implements a thread-safe stack
- * based on an array, supporting basic operations such as `Push`, `Pop`, and `Peek`, with
- * mutex (`Mutex`) protection to ensure data safety.
+ * 等操作，并使用互斥锁 (`Mutex`) 保护数据安全。
+ * This class implements a thread-safe stack based on an array, supporting basic
+ * operations such as `Push`, `Pop`, and `Peek`, with mutex (`Mutex`) protection to ensure
+ * data safety.
  *
  * @tparam Data 栈中存储的数据类型 / The type of data stored in the stack
  */

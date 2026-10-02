@@ -29,7 +29,7 @@ class Thread
     MEDIUM,    ///< 中等优先级 Medium priority
     HIGH,      ///< 高优先级 High priority
     REALTIME,  ///< 实时优先级 Realtime priority
-    NUMBER,    ///< 优先级数量 Number of priority levels
+    NUMBER,    ///< 优先级数量 / Number of priority levels
   };
 
   /**
@@ -48,11 +48,11 @@ class Thread
   /**
    * @brief  创建新线程
    *         Creates a new thread
-   * @tparam ArgType 线程函数的参数类型 The type of argument for the thread function
-   * @param  arg 线程函数的参数 Argument for the thread function
-   * @param  function 线程执行的函数 Function executed by the thread
+   * @tparam ArgType 线程函数的参数类型 / The type of argument for the thread function
+   * @param  arg 线程函数的参数 / Argument for the thread function
+   * @param  function 线程执行的函数 / Function executed by the thread
    * @param  name 线程名称 Thread name
-   * @param  stack_depth 线程栈大小（字节） Stack size of the thread (bytes)
+   * @param  stack_depth 线程栈大小（字节） / Stack size of the thread (bytes)
    * @param  priority 线程优先级 Thread priority
    *
    * @details
@@ -90,7 +90,7 @@ class Thread
       /**
        * @brief  构造函数，存储线程相关数据
        *         Constructor to store thread-related data
-       * @param  fun 线程执行的函数 Function executed by the thread
+       * @param  fun 线程执行的函数 / Function executed by the thread
        * @param  arg 线程参数 Thread argument
        * @param  name 线程名称 Thread name
        */
@@ -132,8 +132,9 @@ class Thread
         return static_cast<void*>(nullptr);
       }
 
-      decltype(function) fun_;  ///< 线程执行的函数 Function executed by the thread
-      ArgType arg_;             ///< 线程函数的参数 Argument passed to the thread function
+      decltype(function) fun_;  ///< 线程执行的函数 / Function executed by the thread
+      ArgType arg_;             ///< 线程函数的参数 / Argument passed to the thread
+                                ///< function
       bool is_realtime_{false};
       WebotsRealtimeThreadRegistration* realtime_registration_{nullptr};
       char name_[16];  ///< 线程名称 Thread name
@@ -170,29 +171,29 @@ class Thread
   /**
    * @brief  获取当前线程对象
    *         Gets the current thread object
-   * @return 当前线程对象 The current thread object
+   * @return 当前线程对象 / The current thread object
    */
   static Thread Current(void);
 
   /**
    * @brief  获取当前系统时间（毫秒）
    *         Gets the current system time in milliseconds
-   * @return 当前时间（毫秒） Current time in milliseconds
+   * @return 当前时间（毫秒） / Current time in milliseconds
    */
   static uint32_t GetTime();
 
   /**
    * @brief  让线程进入休眠状态
    *         Puts the thread to sleep
-   * @param  milliseconds 休眠时间（毫秒） Sleep duration in milliseconds
+   * @param  milliseconds 休眠时间（毫秒） / Sleep duration in milliseconds
    */
   static void Sleep(uint32_t milliseconds);
 
   /**
    * @brief  让线程休眠直到指定时间点
    *         Puts the thread to sleep until a specified time
-   * @param  last_waskup_time 上次唤醒时间 Last wake-up time
-   * @param  time_to_sleep 休眠时长（毫秒） Sleep duration in milliseconds
+   * @param  last_waskup_time 上次唤醒时间 / Last wake-up time
+   * @param  time_to_sleep 休眠时长（毫秒） / Sleep duration in milliseconds
    */
   static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep);
 

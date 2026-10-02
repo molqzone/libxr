@@ -57,7 +57,7 @@ typedef struct
 /**
  * @brief  Webots 平台初始化函数
  *         Webots platform initialization function
- * @param  robot Webots 机器人对象指针 Webots robot object pointer
+ * @param  robot Webots 机器人对象指针 / Webots robot object pointer
  * @param  timer_pri  定时器任务的优先级（默认值 2）
  *                    Timer task priority (default: 2)
  * @param  timer_stack_depth  定时器任务的栈深度（默认值 65536）

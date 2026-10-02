@@ -113,24 +113,24 @@ class Format
 
    public:
     /**
-     * @brief 返回运行期 writer 最终会执行的字节流。 / Returns the final byte stream that
+     * @brief 返回运行期 writer 最终会执行的字节流 / Returns the final byte stream that
      * the runtime writer will execute.
      */
     inline static constexpr auto codes = result.codes;
     /**
-     * @brief 返回当前格式需要哪些 writer 分支的编译期摘要。 / Returns the compile-time
+     * @brief 返回当前格式需要哪些 writer 分支的编译期摘要 / Returns the compile-time
      * summary of which writer branches this format needs.
      */
     inline static constexpr Print::FormatProfile profile = result.profile;
 
     /**
-     * @brief 返回运行期参数打包时要按字段顺序读取的参数列表。 / Returns the field-ordered
+     * @brief 返回运行期参数打包时要按字段顺序读取的参数列表 / Returns the field-ordered
      * argument list the runtime packer will follow.
      */
     [[nodiscard]] static constexpr auto ArgumentList() { return result.arg_info; }
 
     /**
-     * @brief 返回每个字段对应的是第几个源参数。 / Returns, for each field, which source
+     * @brief 返回每个字段对应的是第几个源参数 / Returns, for each field, which source
      * argument index it refers to.
      */
     [[nodiscard]] static constexpr auto ArgumentOrder()
@@ -139,19 +139,19 @@ class Format
     }
 
     /**
-     * @brief 返回与 `codes` 相同的最终字节流。 / Returns the same final byte stream as
+     * @brief 返回与 `codes` 相同的最终字节流 / Returns the same final byte stream as
      * `codes`.
      */
     [[nodiscard]] static constexpr const auto& Codes() { return codes; }
 
     /**
-     * @brief 返回当前编译格式携带的 writer 分支摘要。 / Returns the writer-branch summary
+     * @brief 返回当前编译格式携带的 writer 分支摘要 / Returns the writer-branch summary
      * carried by this compiled format.
      */
     [[nodiscard]] static constexpr Print::FormatProfile Profile() { return profile; }
 
     /**
-     * @brief 判断另一组 C++ 参数类型是否与当前格式绑定时的参数列表完全一致。 / Returns
+     * @brief 判断另一组 C++ 参数类型是否与当前格式绑定时的参数列表完全一致 / Returns
      * whether another C++ argument list is exactly the one this format was built for.
      * @tparam Actual Another C++ argument-type list to compare against. /
      *         待比较的另一组 C++ 实参类型。
@@ -178,7 +178,7 @@ class Format
   }
 
   /**
-   * @brief 判断这条源格式串能否和 `Args...` 一起通过编译。 / Returns whether this source
+   * @brief 判断这条源格式串能否和 `Args...` 一起通过编译 / Returns whether this source
    * string can be compiled with `Args...`.
    * @tparam Args C++ argument types to test. / 待检查的 C++ 实参类型列表。
    * @return Returns `true` when the source can compile with `Args...`,

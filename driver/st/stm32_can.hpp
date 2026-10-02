@@ -103,11 +103,11 @@ class STM32CAN : public CAN
 
   uint32_t txMailbox;
 
-  /// 发送软件队列。 TX software queue.
+  /// 发送软件队列 / TX software queue.
   MPMCQueue<ClassicPack> tx_queue_;
-  /// 待重试帧有效标记。 Pending retry frame flag.
+  /// 待重试帧有效标记 / Pending retry frame flag.
   bool tx_retry_valid_{false};
-  /// 待重试帧。 Pending retry frame.
+  /// 待重试帧 / Pending retry frame.
   ClassicPack tx_retry_pack_{};
 
   std::atomic<uint32_t> tx_lock_{0};

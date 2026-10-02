@@ -23,34 +23,34 @@ class Flash
    * 构造函数，初始化闪存属性。
    * @param min_erase_size Minimum erasable block size in bytes.
    * 最小可擦除块大小（字节）。
-   * @param min_write_size Minimum writable block size in bytes. 最小可写块大小（字节）。
+   * @param min_write_size 最小可写块大小（字节） / Minimum writable block size in bytes.
    * @param flash_area Memory area allocated for flash operations.
    * 用于闪存操作的存储区域。
    */
   Flash(size_t min_erase_size, size_t min_write_size, RawData flash_area);
 
   /**
-   * @brief Erases a section of the flash memory. 擦除闪存的指定区域。
-   * @param offset The starting offset of the section to erase. 要擦除的起始偏移地址。
-   * @param size The size of the section to erase. 要擦除的区域大小。
-   * @return ErrorCode indicating success or failure. 返回操作结果的错误码。
+   * @brief 擦除闪存的指定区域 / Erases a section of the flash memory.
+   * @param offset 要擦除的起始偏移地址 / The starting offset of the section to erase.
+   * @param size 要擦除的区域大小 / The size of the section to erase.
+   * @return 返回操作结果的错误码 / ErrorCode indicating success or failure.
    */
   virtual ErrorCode Erase(size_t offset, size_t size) = 0;
 
   /**
-   * @brief Writes data to the flash memory. 向闪存写入数据。
-   * @param offset The starting offset to write data. 数据写入的起始偏移地址。
-   * @param data The data to be written. 需要写入的数据。
-   * @return ErrorCode indicating success or failure. 返回操作结果的错误码。
+   * @brief 向闪存写入数据 / Writes data to the flash memory.
+   * @param offset 数据写入的起始偏移地址 / The starting offset to write data.
+   * @param data 需要写入的数据 / The data to be written.
+   * @return 返回操作结果的错误码 / ErrorCode indicating success or failure.
    */
   virtual ErrorCode Write(size_t offset, ConstRawData data) = 0;
 
   /**
-   * @brief Reads data from the flash memory. 从闪存中读取数据。
+   * @brief 从闪存中读取数据 / Reads data from the flash memory.
    *
-   * @param offset The starting offset to read data. 数据读取的起始偏移地址。
-   * @param data Data buffer to store the read data. 存储读取数据的缓冲区。
-   * @return ErrorCode indicating success or failure. 返回操作结果的错误码。
+   * @param offset 数据读取的起始偏移地址 / The starting offset to read data.
+   * @param data 存储读取数据的缓冲区 / Data buffer to store the read data.
+   * @return 返回操作结果的错误码 / ErrorCode indicating success or failure.
    */
   virtual ErrorCode Read(size_t offset, RawData data);
 
@@ -83,9 +83,9 @@ class Flash
 
  private:
   size_t min_erase_size_ =
-      0;  ///< Minimum erasable block size in bytes. 最小可擦除块大小（字节）。
+      0;  ///< 最小可擦除块大小（字节） / Minimum erasable block size in bytes.
   size_t min_write_size_ =
-      0;  ///< Minimum writable block size in bytes. 最小可写块大小（字节）。
+      0;  ///< 最小可写块大小（字节） / Minimum writable block size in bytes.
   RawData flash_area_;  ///< Memory area allocated for flash operations.
                         ///< 用于闪存操作的存储区域。
 };

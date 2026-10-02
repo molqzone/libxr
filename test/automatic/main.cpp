@@ -143,7 +143,7 @@ void RunTestCase(const TestCase& test_case, bool direct)
 
   if (child == 0)
   {
-    // 多线程 fork 后只执行 exec 或退出。/ Only exec or exit after a threaded fork.
+    // 多线程 fork 后只执行 exec 或退出 / Only exec or exit after a threaded fork.
     execl("/proc/self/exe", "test", "--direct-case", test_case.name,
           static_cast<char*>(nullptr));
     _exit(127);

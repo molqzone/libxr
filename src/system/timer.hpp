@@ -37,23 +37,23 @@ class Timer
      */
     void Run() { fun_(handle); }
 
-    void (*fun_)(void*);  ///< 任务执行函数 Function pointer to the task
-    void* handle;         ///< 任务句柄 Handle to the task
-    uint32_t cycle_;      ///< 任务周期（单位：毫秒） Task cycle (unit: milliseconds)
+    void (*fun_)(void*);  ///< 任务执行函数 / Function pointer to the task
+    void* handle;         ///< 任务句柄 / Handle to the task
+    uint32_t cycle_;      ///< 任务周期（单位：毫秒） / Task cycle (unit: milliseconds)
     uint32_t count_;      ///< 计数器 Counter
-    bool enable_;         ///< 任务是否启用 Flag indicating whether the task is enabled
+    bool enable_;         ///< 任务是否启用 / Flag indicating whether the task is enabled
   };
 
   typedef LibXR::LockFreeList::Node<ControlBlock>*
-      TimerHandle;  ///< 定时器任务句柄 Timer task handle
+      TimerHandle;  ///< 定时器任务句柄 / Timer task handle
 
   /**
    * @brief  创建定时任务
    *         Creates a periodic task
-   * @tparam ArgType 任务参数类型 Type of task argument
-   * @param  fun 定时执行的任务函数 Function to execute periodically
-   * @param  arg 任务参数 Argument for the function
-   * @param  cycle 任务周期（毫秒） Task execution cycle (milliseconds)
+   * @tparam ArgType 任务参数类型 / Type of task argument
+   * @param  fun 定时执行的任务函数 / Function to execute periodically
+   * @param  arg 任务参数 / Argument for the function
+   * @param  cycle 任务周期（毫秒） / Task execution cycle (milliseconds)
    * @return 任务句柄 TimerHandle pointing to the created task
    *
    * @details
@@ -96,22 +96,22 @@ class Timer
   /**
    * @brief  启动定时任务
    *         Starts a periodic task
-   * @param  handle 任务句柄 Timer handle to start
+   * @param  handle 任务句柄 / Timer handle to start
    */
   static void Start(TimerHandle handle);
 
   /**
    * @brief  停止定时任务
    *         Stops a periodic task
-   * @param  handle 任务句柄 Timer handle to stop
+   * @param  handle 任务句柄 / Timer handle to stop
    */
   static void Stop(TimerHandle handle);
 
   /**
    * @brief  设置定时任务的周期
    *         Sets the cycle of a periodic task
-   * @param  handle 任务句柄 Timer handle to modify
-   * @param  cycle 任务周期（毫秒） New cycle time (milliseconds)
+   * @param  handle 任务句柄 / Timer handle to modify
+   * @param  cycle 任务周期（毫秒） / New cycle time (milliseconds)
    */
   static void SetCycle(TimerHandle handle, uint32_t cycle);
 
@@ -133,7 +133,7 @@ class Timer
   /**
    * @brief  添加定时任务
    *         Adds a periodic task
-   * @param  handle 任务句柄 Timer handle to add
+   * @param  handle 任务句柄 / Timer handle to add
    *
    * @note 包含动态内存分配。
    *       Contains dynamic memory allocation.
@@ -160,13 +160,13 @@ class Timer
   static void RefreshTimerInIdle();
 
   static inline LibXR::LockFreeList* list_ =
-      nullptr;  ///< 定时任务列表 List of registered tasks
+      nullptr;  ///< 定时任务列表 / List of registered tasks
 
-  static inline Thread thread_handle_;  ///< 定时器管理线程 Timer management thread
+  static inline Thread thread_handle_;  ///< 定时器管理线程 / Timer management thread
 
   static inline LibXR::Thread::Priority priority_ =
       LibXR::Thread::Priority::MEDIUM;        ///< 线程优先级 Thread priority
-  static inline uint32_t stack_depth_ = 512;  ///< 线程栈深度 Thread stack depth
+  static inline uint32_t stack_depth_ = 512;  ///< 线程栈深度 / Thread stack depth
 };
 
 }  // namespace LibXR

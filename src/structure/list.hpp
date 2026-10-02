@@ -43,8 +43,8 @@ class List
      */
     ~BaseNode();
 
-    BaseNode* next_ = nullptr;  ///< 指向下一个节点的指针。 Pointer to the next node.
-    size_t size_;  ///< 当前节点的数据大小（字节）。 Size of the current node (in bytes).
+    BaseNode* next_ = nullptr;  ///< 指向下一个节点的指针 / Pointer to the next node.
+    size_t size_;  ///< 当前节点的数据大小（字节） / Size of the current node (in bytes).
   };
 
   /**
@@ -108,7 +108,7 @@ class List
     Data& operator*() noexcept { return data_; }
     operator Data&() noexcept { return data_; }
 
-    Data data_;  ///< 存储的数据。 The stored data.
+    Data data_;  ///< 存储的数据 / The stored data.
   };
 
   /**
@@ -185,8 +185,8 @@ class List
   }
 
  private:
-  BaseNode head_;       ///< 链表头节点。 The head node of the list.
-  LibXR::Mutex mutex_;  ///< 线程安全的互斥锁。 Thread-safe mutex.
+  BaseNode head_;       ///< 链表头节点 / The head node of the list.
+  LibXR::Mutex mutex_;  ///< 线程安全的互斥锁 / Thread-safe mutex.
 };
 
 }  // namespace LibXR

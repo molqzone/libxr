@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief 通用浮点文本格式化器使用的数学辅助函数。 / Math helpers used by the generic
+ * @brief 通用浮点文本格式化器使用的数学辅助函数 / Math helpers used by the generic
  * float text formatter.
  */
 

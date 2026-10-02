@@ -117,7 +117,7 @@ struct ChainConfig
 };
 
 /**
- * @brief 更新链路缓存（可选）。Update chain cache (optional).
+ * @brief 更新链路缓存（可选） / Update chain cache (optional).
  *
  * @note 默认假设 index=0 为 TDO 侧设备；缓存仅用于加速，不强制依赖。
  */

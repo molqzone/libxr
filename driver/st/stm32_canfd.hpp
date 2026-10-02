@@ -263,17 +263,17 @@ class STM32CANFD : public FDCAN
   FDCAN_HandleTypeDef* hcan_;
 
   stm32_fdcan_id_t id_;
-  /// Classic 发送软件队列。 Classic TX software queue.
+  /// Classic 发送软件队列 / Classic TX software queue.
   MPMCQueue<ClassicPack> tx_queue_;
-  /// FD 发送软件队列。 FD TX software queue.
+  /// FD 发送软件队列 / FD TX software queue.
   MPMCQueue<FDPack> tx_fd_queue_;
-  /// 待重试 Classic 帧有效标记。 Pending Classic retry frame flag.
+  /// 待重试 Classic 帧有效标记 / Pending Classic retry frame flag.
   bool tx_classic_retry_valid_{false};
-  /// 待重试 Classic 帧。 Pending Classic retry frame.
+  /// 待重试 Classic 帧 / Pending Classic retry frame.
   ClassicPack tx_classic_retry_pack_{};
-  /// 待重试 FD 帧有效标记。 Pending FD retry frame flag.
+  /// 待重试 FD 帧有效标记 / Pending FD retry frame flag.
   bool tx_fd_retry_valid_{false};
-  /// 待重试 FD 帧。 Pending FD retry frame.
+  /// 待重试 FD 帧 / Pending FD retry frame.
   FDPack tx_fd_retry_pack_{};
 
   static STM32CANFD* map[STM32_FDCAN_NUMBER];  // NOLINT

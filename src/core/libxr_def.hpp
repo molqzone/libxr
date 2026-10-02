@@ -266,7 +266,7 @@ enum class SizeLimitMode : uint8_t
  * @brief 库内部实现的开发期检查 / Development check for library implementation
  * @note 默认禁用且不求值；仅在定义 LIBXR_DEV_ASSERT_BUILD 时启用。
  *       Disabled without evaluation unless LIBXR_DEV_ASSERT_BUILD is defined.
- *       条件不得包含必须执行的操作。 / Conditions must not contain required operations.
+ *       条件不得包含必须执行的操作 / Conditions must not contain required operations.
  * @param arg 要检查的条件 | Condition to check
  */
 #ifdef LIBXR_DEV_ASSERT_BUILD

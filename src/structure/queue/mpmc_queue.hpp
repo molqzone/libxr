@@ -20,32 +20,32 @@ namespace LibXR
  * `Payload*` pointers, so `Payload` alignment does not add an extra semantic
  * constraint on the internal byte-buffer contract.
  *
- * @tparam Payload 队列存储的数据类型。 Queue element type.
+ * @tparam Payload 队列存储的数据类型 / Queue element type.
  */
 template <typename Payload>
 class MPMCQueue final : public QueueTypedBase<MPMCQueue<Payload>, Payload>,
                         public MPMCQueueBase
 {
-  /// @brief 仅接受平凡可拷贝 payload。 Accepts only trivially copyable payloads.
+  /// @brief 仅接受平凡可拷贝 payload / Accepts only trivially copyable payloads.
   static_assert(std::is_trivially_copyable_v<Payload>,
                 "MPMCQueue requires trivially copyable payloads");
-  /// @brief 仅接受平凡可析构 payload。 Accepts only trivially destructible payloads.
+  /// @brief 仅接受平凡可析构 payload / Accepts only trivially destructible payloads.
   static_assert(std::is_trivially_destructible_v<Payload>,
                 "MPMCQueue requires trivially destructible payloads");
 
  public:
-  using ValueType = Payload;  ///< 队列元素类型。 Queue element type.
-  /// @brief 重新公开强类型出队接口。 Re-expose the typed pop interface.
+  using ValueType = Payload;  ///< 队列元素类型 / Queue element type.
+  /// @brief 重新公开强类型出队接口 / Re-expose the typed pop interface.
   using QueueTypedBase<MPMCQueue<Payload>, Payload>::Pop;
-  /// @brief 重新公开强类型入队接口。 Re-expose the typed push interface.
+  /// @brief 重新公开强类型入队接口 / Re-expose the typed push interface.
   using QueueTypedBase<MPMCQueue<Payload>, Payload>::Push;
 
   /**
    * @brief 构造一个 MPMC 队列。
    * @brief Construct one MPMC queue.
-   * @param capacity 队列容量。 Queue capacity.
+   * @param capacity 队列容量 / Queue capacity.
    *
-   * @note 包含动态内存分配。 Contains dynamic memory allocation.
+   * @note 包含动态内存分配 / Contains dynamic memory allocation.
    */
   explicit MPMCQueue(size_t capacity) : MPMCQueueBase(sizeof(Payload), capacity) {}
 };

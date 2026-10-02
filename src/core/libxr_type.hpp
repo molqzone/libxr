@@ -196,9 +196,9 @@ class ConstRawData
 
   /**
    * @brief 从 `char*` / `const char*` 文本指针构造
-   * `ConstRawData`，数据大小为字符串长度（不含 `\0`）。 Constructs `ConstRawData` from a
-   * `char*` / `const char*` text pointer, with size set to the string length (excluding
-   * `\0`).
+   * `ConstRawData`，数据大小为字符串长度（不含 `\0`）。
+   * Constructs `ConstRawData` from a `char*` / `const char*` text pointer, with size set
+   * to the string length (excluding `\0`).
    *
    * @param data C 风格字符串指针。
    *             A C-style string pointer.

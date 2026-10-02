@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @brief writer 执行器的顶层运行期操作码循环。 / Top-level runtime opcode loop for the
+ * @brief writer 执行器的顶层运行期操作码循环 / Top-level runtime opcode loop for the
  * writer executor.
  */
 

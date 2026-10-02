@@ -38,7 +38,7 @@ class PID
     Scalar d = 0.0;          ///< 微分项 Derivative gain
     Scalar i_limit = 0.0;    ///< 积分限幅 Integral limit
     Scalar out_limit = 0.0;  ///< 输出限幅 Output limit
-    bool cycle = false;      ///< 是否处理周期误差 Whether input is cyclic
+    bool cycle = false;      ///< 是否处理周期误差 / Whether input is cyclic
   };
 
   /**
@@ -68,7 +68,7 @@ class PID
    *
    * @param sp 期望值 Setpoint
    * @param fb 反馈值 Feedback
-   * @param dt 控制周期（秒） Time step in seconds
+   * @param dt 控制周期（秒） / Time step in seconds
    * @return 控制器输出 Controller output
    */
   Scalar Calculate(Scalar sp, Scalar fb, Scalar dt)
@@ -182,7 +182,7 @@ class PID
    *
    * @param sp 期望值 Setpoint
    * @param fb 反馈值 Feedback
-   * @param fb_dot 反馈导数 Feedback rate (d(fb)/dt)
+   * @param fb_dot 反馈导数 / Feedback rate (d(fb)/dt)
    * @param dt 控制周期 Delta time
    * @return 控制器输出 Controller output
    */
@@ -273,36 +273,36 @@ class PID
     return output;
   }
 
-  /// 设置全局比例系数 Set global proportional gain
+  /// 设置全局比例系数 / Set global proportional gain
   void SetK(Scalar k) { param_.k = k; }
-  /// 设置 P 项系数 Set proportional gain
+  /// 设置 P 项系数 / Set proportional gain
   void SetP(Scalar p) { param_.p = p; }
-  /// 设置 I 项系数 Set integral gain
+  /// 设置 I 项系数 / Set integral gain
   void SetI(Scalar i) { param_.i = i; }
-  /// 设置 D 项系数 Set derivative gain
+  /// 设置 D 项系数 / Set derivative gain
   void SetD(Scalar d) { param_.d = d; }
-  /// 设置积分限幅 Set integral limit
+  /// 设置积分限幅 / Set integral limit
   void SetILimit(Scalar limit) { param_.i_limit = limit; }
-  /// 设置输出限幅 Set output limit
+  /// 设置输出限幅 / Set output limit
   void SetOutLimit(Scalar limit) { param_.out_limit = limit; }
 
-  /// 获取全局比例系数 Get global proportional gain
+  /// 获取全局比例系数 / Get global proportional gain
   Scalar K() const { return param_.k; }
-  /// 获取 P 项系数 Get proportional gain
+  /// 获取 P 项系数 / Get proportional gain
   Scalar P() const { return param_.p; }
-  /// 获取 I 项系数 Get integral gain
+  /// 获取 I 项系数 / Get integral gain
   Scalar I() const { return param_.i; }
-  /// 获取 D 项系数 Get derivative gain
+  /// 获取 D 项系数 / Get derivative gain
   Scalar D() const { return param_.d; }
-  /// 获取积分限幅 Get integral limit
+  /// 获取积分限幅 / Get integral limit
   Scalar ILimit() const { return param_.i_limit; }
-  /// 获取输出限幅 Get output limit
+  /// 获取输出限幅 / Get output limit
   Scalar OutLimit() const { return param_.out_limit; }
-  /// 获取上一次误差 Get last error
+  /// 获取上一次误差 / Get last error
   Scalar LastError() const { return last_err_; }
   /// 获取上一次反馈值（未缩放）Get last feedback (raw)
   Scalar LastFeedback() const { return last_fb_; }
-  /// 获取上一次输出 Get last output
+  /// 获取上一次输出 / Get last output
   Scalar LastOutput() const { return last_out_; }
   /// 获取上一次导数（k * d(fb)/dt 或 k * fb_dot）Get last derivative (scaled by k)
   Scalar LastDerivative() const { return last_der_; }
@@ -321,14 +321,14 @@ class PID
   }
 
   /**
-   * @brief 设置累计误差 Set integral error
+   * @brief 设置累计误差 / Set integral error
    *
    * @param err 累计误差 Integral error
    */
   void SetIntegralError(Scalar err) { i_ = err; }
 
   /**
-   * @brief 获取累计误差 Get integral error
+   * @brief 获取累计误差 / Get integral error
    *
    * @return 累计误差 Integral error
    */

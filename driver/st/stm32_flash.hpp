@@ -106,9 +106,10 @@ typename std::enable_if<HasFlashBank<T>::value>::type SetBanks(T& init, uint32_t
  *      The caller serializes erase/program calls and related cache control; the HAL
  *      tick must advance during waits.
  * @note 擦写期间暂时关闭相关缓存；进入擦写流程后，成功或失败返回均恢复缓存开关并锁定
- * Flash。 Related caches are temporarily disabled during erase/program operations. Once
- * the operation starts, success and failure returns restore the original cache enable
- * state and lock Flash.
+ * Flash。
+ * Related caches are temporarily disabled during erase/program operations. Once the
+ * operation starts, success and failure returns restore the original cache enable state
+ * and lock Flash.
  * @note 扇区表须从 Flash 起始地址开始、按地址列出整片 Flash 的每个扇区或页。擦除时按地址
  * 判断所在 bank，H5、H7 和使用 Page 字段的系列按 bank 内序号擦除，F2/F4/F7 按跨 bank 的
  * 扇区号擦除。不支持 bank 交换（SWAP_BANK、BFB2 等选项字节）。

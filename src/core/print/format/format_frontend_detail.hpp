@@ -19,7 +19,7 @@
 namespace LibXR::Print::Detail::FormatFrontend
 {
 /**
- * @brief brace 风格 format 前端的编译期失败类别。 / Compile-time failure categories for
+ * @brief brace 风格 format 前端的编译期失败类别 / Compile-time failure categories for
  * the brace-style format frontend.
  */
 enum class Error : uint8_t
@@ -55,7 +55,7 @@ enum class Error : uint8_t
 };
 
 /**
- * @brief 降为 FormatFlag 位之前的已解析对齐方式。 / Parsed alignment directive before
+ * @brief 降为 FormatFlag 位之前的已解析对齐方式 / Parsed alignment directive before
  * lowering into FormatFlag bits.
  */
 enum class Align : uint8_t
@@ -67,7 +67,7 @@ enum class Align : uint8_t
 };
 
 /**
- * @brief 在绑定到具体 C++ 参数类型之前的 brace 字段解析结果。 / Parsed brace field before
+ * @brief 在绑定到具体 C++ 参数类型之前的 brace 字段解析结果 / Parsed brace field before
  * binding it to one concrete C++ argument type.
  */
 struct ParsedField
@@ -88,7 +88,7 @@ struct ParsedField
 };
 
 /**
- * @brief 前端侧的参数类别，用来选择字段该走哪条解析路径。 / Frontend-side argument
+ * @brief 前端侧的参数类别，用来选择字段该走哪条解析路径 / Frontend-side argument
  * categories used to choose one field-resolution path.
  */
 enum class ArgumentKind : uint8_t
@@ -106,7 +106,7 @@ enum class ArgumentKind : uint8_t
 };
 
 /**
- * @brief 单个 C++ 参数在前端里的类别摘要，以及对应的宽度策略。 / Frontend summary of one
+ * @brief 单个 C++ 参数在前端里的类别摘要，以及对应的宽度策略 / Frontend summary of one
  * C++ argument category plus width policy.
  */
 struct ArgumentSummary
@@ -118,7 +118,7 @@ struct ArgumentSummary
 };
 
 /**
- * @brief 将单个已解析 brace 字段解析成共享格式协议后的结果。 / Result of resolving one
+ * @brief 将单个已解析 brace 字段解析成共享格式协议后的结果 / Result of resolving one
  * parsed brace field into the shared format protocol.
  */
 struct ResolvedField

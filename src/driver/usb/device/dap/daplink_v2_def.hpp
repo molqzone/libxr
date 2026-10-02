@@ -23,9 +23,9 @@ namespace DapLinkV2Def
 // ==============================
 
 static constexpr std::uint16_t MAX_REQUEST_SIZE =
-    512u;  ///< 最大请求长度。Max request size.
+    512u;  ///< 最大请求长度 / Max request size.
 static constexpr std::uint16_t MAX_RESPONSE_SIZE =
-    512u;  ///< 最大响应长度。Max response size.
+    512u;  ///< 最大响应长度 / Max response size.
 
 // ==============================
 // CMSIS-DAP v2 Command IDs / 命令号
@@ -103,9 +103,9 @@ enum class InfoId : std::uint8_t
 // Capabilities bits / 能力位（DAP_Info: Capabilities）
 // ==============================
 
-static constexpr std::uint8_t DAP_CAP_SWD = 0x01u;   ///< 支持 SWD。Supports SWD.
-static constexpr std::uint8_t DAP_CAP_JTAG = 0x02u;  ///< 支持 JTAG。Supports JTAG.
-static constexpr std::uint8_t DAP_CAP_SWO = 0x04u;   ///< 支持 SWO。Supports SWO.
+static constexpr std::uint8_t DAP_CAP_SWD = 0x01u;   ///< 支持 SWD / Supports SWD.
+static constexpr std::uint8_t DAP_CAP_JTAG = 0x02u;  ///< 支持 JTAG / Supports JTAG.
+static constexpr std::uint8_t DAP_CAP_SWO = 0x04u;   ///< 支持 SWO / Supports SWO.
 
 // ==============================
 // Status / Port / 状态与端口
@@ -177,27 +177,27 @@ static constexpr std::uint8_t JTAG_SEQUENCE_TDO = (1u << 7);
 // Helpers / 工具函数
 // ==============================
 
-/// 从 transfer request 字节提取 A[3:2]（2-bit）。Extract A[3:2] from transfer request
-/// (2-bit).
+/// 从 transfer request 字节提取 A[3:2]（2-bit）。
+/// Extract A[3:2] from transfer request (2-bit).
 static inline constexpr std::uint8_t req_addr2b(std::uint8_t req)
 {
   return static_cast<std::uint8_t>(((req & DAP_TRANSFER_A2) ? 1u : 0u) |
                                    ((req & DAP_TRANSFER_A3) ? 2u : 0u));
 }
 
-/// 判断是否为 AP 访问。Check if request targets AP.
+/// 判断是否为 AP 访问 / Check if request targets AP.
 static inline constexpr bool req_is_ap(std::uint8_t req)
 {
   return (req & DAP_TRANSFER_APNDP) != 0u;
 }
 
-/// 判断是否为读操作。Check if request is read (RnW=1).
+/// 判断是否为读操作 / Check if request is read (RnW=1).
 static inline constexpr bool req_is_read(std::uint8_t req)
 {
   return (req & DAP_TRANSFER_RNW) != 0u;
 }
 
-/// 判断是否需要 timestamp。Check if request needs timestamp.
+/// 判断是否需要 timestamp / Check if request needs timestamp.
 static inline constexpr bool req_need_timestamp(std::uint8_t req)
 {
   return (req & DAP_TRANSFER_TIMESTAMP) != 0u;
@@ -209,31 +209,32 @@ static inline constexpr bool req_need_timestamp(std::uint8_t req)
 
 struct TransferConfig
 {
-  std::uint8_t idle_cycles = 0u;     ///< 空闲时钟插入。Idle cycles insertion.
-  std::uint16_t retry_count = 100u;  ///< WAIT 重试次数。WAIT retry count.
-  std::uint16_t match_retry = 0u;    ///< MATCH 重试次数。MATCH retry count.
-  std::uint32_t match_mask = 0u;     ///< MATCH 掩码。MATCH mask.
+  std::uint8_t idle_cycles = 0u;     ///< 空闲时钟插入 / Idle cycles insertion.
+  std::uint16_t retry_count = 100u;  ///< WAIT 重试次数 / WAIT retry count.
+  std::uint16_t match_retry = 0u;    ///< MATCH 重试次数 / MATCH retry count.
+  std::uint32_t match_mask = 0u;     ///< MATCH 掩码 / MATCH mask.
 };
 
 struct SwdConfig
 {
-  std::uint8_t turnaround = 1u;  ///< Turnaround 周期。Turnaround cycles.
-  bool data_phase = false;       ///< Data phase 标志。Data phase flag.
+  std::uint8_t turnaround = 1u;  ///< Turnaround 周期 / Turnaround cycles.
+  bool data_phase = false;       ///< Data phase 标志 / Data phase flag.
 };
 
 struct State
 {
-  DebugPort debug_port = DebugPort::DISABLED;  ///< 当前调试端口。Current debug port.
-  volatile bool transfer_abort = false;        ///< 传输中止标志。Transfer abort flag.
+  DebugPort debug_port = DebugPort::DISABLED;  ///< 当前调试端口 / Current debug port.
+  volatile bool transfer_abort = false;        ///< 传输中止标志 / Transfer abort flag.
 
-  TransferConfig transfer_cfg;  ///< Transfer 配置。Transfer configuration.
-  SwdConfig swd_cfg;            ///< SWD 配置。SWD configuration.
+  TransferConfig transfer_cfg;  ///< Transfer 配置 / Transfer configuration.
+  SwdConfig swd_cfg;            ///< SWD 配置 / SWD configuration.
 };
 
 struct CommandResult
 {
-  std::uint16_t request_consumed = 0u;    ///< 已消耗请求字节数。Request bytes consumed.
-  std::uint16_t response_generated = 0u;  ///< 已生成响应字节数。Response bytes generated.
+  std::uint16_t request_consumed = 0u;    ///< 已消耗请求字节数 / Request bytes consumed.
+  std::uint16_t response_generated = 0u;  ///< 已生成响应字节数 / Response bytes
+                                          ///< generated.
 };
 
 }  // namespace DapLinkV2Def

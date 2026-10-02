@@ -23,12 +23,12 @@ class STDIO
   // Shared global stdio binding state.
   // 共享的全局 stdio 绑定状态。
   // NOLINTBEGIN
-  static inline ReadPort* read_ = nullptr;    ///< Read port instance. 读取端口。
-  static inline WritePort* write_ = nullptr;  ///< Write port instance. 写入端口。
+  static inline ReadPort* read_ = nullptr;    ///< 读取端口 / Read port instance.
+  static inline WritePort* write_ = nullptr;  ///< 写入端口 / Write port instance.
   static inline LibXR::Mutex* write_mutex_ =
-      nullptr;  ///< Write port mutex. 写入端口互斥锁。
+      nullptr;  ///< 写入端口互斥锁 / Write port mutex.
   static inline LibXR::WritePort::Stream* write_stream_ =
-      nullptr;  ///< Optional externally owned write stream. 可选的外部托管写流。
+      nullptr;  ///< 可选的外部托管写流 / Optional externally owned write stream.
                 // NOLINTEND
 
  private:
@@ -69,7 +69,7 @@ class STDIO
    private:
     WritePort::Stream& stream_;  ///< Active stream session receiving retained bytes.
                                  ///< 接收保留字节的活动流会话。
-    size_t retained_size_ = 0;   ///< Bytes retained so far. 当前已保留的字节数。
+    size_t retained_size_ = 0;   ///< 当前已保留的字节数 / Bytes retained so far.
     bool saturated_ = false;     ///< No more bytes should be retained in this session.
                                  ///< 当前会话不再继续保留输出。
   };
@@ -88,8 +88,8 @@ class STDIO
   struct CompiledCall
   {
     const CompiledFormat&
-        format;  ///< Compile-time compiled format object. 编译期已编译的格式对象。
-    std::tuple<Args&&...> args;  ///< Forwarded runtime arguments. 转发保存的运行时参数。
+        format;  ///< 编译期已编译的格式对象 / Compile-time compiled format object.
+    std::tuple<Args&&...> args;  ///< 转发保存的运行时参数 / Forwarded runtime arguments.
 
     /**
      * @brief 将当前模板上下文桥接到编译格式前端写入入口 / Bridge the current template

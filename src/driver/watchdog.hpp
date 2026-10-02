@@ -25,8 +25,8 @@ class Watchdog
    */
   struct Configuration
   {
-    uint32_t timeout_ms;  ///< 看门狗溢出时间 Watchdog overflow time (ms)
-    uint32_t feed_ms;     ///< 自动喂狗周期 Auto feed interval (ms, < timeout_ms)
+    uint32_t timeout_ms;  ///< 看门狗溢出时间 / Watchdog overflow time (ms)
+    uint32_t feed_ms;     ///< 自动喂狗周期 / Auto feed interval (ms, < timeout_ms)
   };
 
   /**
@@ -43,14 +43,14 @@ class Watchdog
    * @brief 初始化硬件并设置超时时间
    *        Initialize hardware and set overflow time
    * @param config 配置参数 Configuration
-   * @return 操作结果的错误码 Error code of the operation
+   * @return 操作结果的错误码 / Error code of the operation
    */
   virtual ErrorCode SetConfig(const Configuration& config) = 0;
 
   /**
    * @brief 立即手动喂狗
    *        Feed the watchdog immediately
-   * @return 操作结果的错误码 Error code of the operation
+   * @return 操作结果的错误码 / Error code of the operation
    */
   virtual ErrorCode Feed() = 0;
 
@@ -70,10 +70,11 @@ class Watchdog
    *
    * @details
    * 适合 RTOS/多线程环境。可直接传递给线程创建API作为入口，循环调用 Feed()，每隔
-   * feed_ms 毫秒自动喂狗。 Suitable for RTOS or multi-threading. Call by thread
-   * system, periodically feeds the watchdog.
+   * feed_ms 毫秒自动喂狗。
+   * Suitable for RTOS or multi-threading. Call by thread system, periodically feeds the
+   * watchdog.
    *
-   * @param wdg 指向 Watchdog 实例的指针 Pointer to the Watchdog instance
+   * @param wdg 指向 Watchdog 实例的指针 / Pointer to the Watchdog instance
    */
   static void ThreadFun(Watchdog* wdg)
   {
@@ -96,7 +97,7 @@ class Watchdog
    * Suitable for cooperative/periodic polling system. Called by timer, feeds the watchdog
    * once per call.
    *
-   * @param wdg 指向 Watchdog 实例的指针 Pointer to the Watchdog instance
+   * @param wdg 指向 Watchdog 实例的指针 / Pointer to the Watchdog instance
    */
   static void TaskFun(Watchdog* wdg)
   {

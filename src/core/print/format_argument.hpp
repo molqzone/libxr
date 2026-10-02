@@ -58,7 +58,7 @@ struct TypeTraits
   static constexpr bool is_long_double = std::is_same_v<Decayed, long double>;
 
   /**
-   * @brief 判断当前 C++ 实参类型是否满足某条编译期匹配规则。 / Returns whether this C++
+   * @brief 判断当前 C++ 实参类型是否满足某条编译期匹配规则 / Returns whether this C++
    * argument type satisfies one compile-time rule.
    * @param rule Compile-time matching rule to test. / 待测试的编译期匹配规则。
    * @return Returns `true` when the current type satisfies `rule`, otherwise

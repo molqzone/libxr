@@ -44,8 +44,8 @@ class LockFreeList
     ~BaseNode();
 
     std::atomic<BaseNode*> next_ =
-        nullptr;   ///< 指向下一个节点的原子指针。 Atomic pointer to the next node.
-    size_t size_;  ///< 当前节点的数据大小（字节）。 Size of the current node (in bytes).
+        nullptr;   ///< 指向下一个节点的原子指针 / Atomic pointer to the next node.
+    size_t size_;  ///< 当前节点的数据大小（字节） / Size of the current node (in bytes).
   };
 
   /**
@@ -109,7 +109,7 @@ class LockFreeList
     Data& operator*() noexcept { return data_; }
     operator Data&() noexcept { return data_; }
 
-    Data data_;  ///< 存储的数据。 The stored data.
+    Data data_;  ///< 存储的数据 / The stored data.
   };
 
   /**
@@ -172,7 +172,7 @@ class LockFreeList
   }
 
  private:
-  BaseNode head_;  ///< 链表头节点。 The head node of the list.
+  BaseNode head_;  ///< 链表头节点 / The head node of the list.
 };
 
 }  // namespace LibXR

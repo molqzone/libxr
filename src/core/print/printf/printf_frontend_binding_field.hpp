@@ -91,7 +91,7 @@ namespace FieldSelection
 }
 
 /**
- * @brief 为一个运行期语义类型选择参数打包存储类别。 / Chooses the packed storage kind for
+ * @brief 为一个运行期语义类型选择参数打包存储类别 / Chooses the packed storage kind for
  * one runtime semantic type.
  * @param type Runtime semantic type. / 运行期语义类型。
  * @return Returns the packed storage kind used by that runtime type. /
@@ -148,7 +148,7 @@ namespace FieldSelection
 }
 
 /**
- * @brief 为一个已解析转换选择它消耗的编译期参数匹配规则。 / Chooses which compile-time
+ * @brief 为一个已解析转换选择它消耗的编译期参数匹配规则 / Chooses which compile-time
  * argument rule one parsed conversion consumes.
  * @param conversion Parsed printf conversion. / 已解析的 printf 转换项。
  * @return Returns the compile-time argument rule consumed by this conversion. /
@@ -194,7 +194,7 @@ namespace FieldSelection
 }
 
 /**
- * @brief 在解析后校验与目标相关的格式选择约束。 / Validates target-dependent
+ * @brief 在解析后校验与目标相关的格式选择约束 / Validates target-dependent
  * format-selection constraints after parsing.
  * @param conversion Parsed printf conversion. / 已解析的 printf 转换项。
  * @return Returns `Error::None` when the conversion is legal on the current
@@ -222,7 +222,7 @@ namespace FieldSelection
 }
 
 /**
- * @brief 为一个已解析 printf 转换构造共享 FormatField 记录。 / Builds the shared
+ * @brief 为一个已解析 printf 转换构造共享 FormatField 记录 / Builds the shared
  * FormatField record for one parsed printf conversion.
  * @param conversion Parsed printf conversion. / 已解析的 printf 转换项。
  * @return Returns the shared `FormatField` record consumed by the compile-time

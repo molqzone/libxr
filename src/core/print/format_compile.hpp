@@ -13,7 +13,7 @@
 namespace LibXR::Print
 {
 /**
- * @brief 共享编译期后端，把前端事件整理成最终字节流和参数表。 / Shared compile-time
+ * @brief 共享编译期后端，把前端事件整理成最终字节流和参数表 / Shared compile-time
  * backend that turns frontend events into the final byte stream plus argument table.
  *
  * Frontend contract:
@@ -157,7 +157,7 @@ class FormatCompiler
   }
 
   /**
-   * @brief 构造只携带编译错误的最小失败结果。 / Builds the minimal failed result carrying
+   * @brief 构造只携带编译错误的最小失败结果 / Builds the minimal failed result carrying
    * only the compile error.
    * @param error Compile-time failure category. / 编译期失败类别。
    * @return Returns a minimal failed result object. / 返回最小失败结果对象。
@@ -170,7 +170,7 @@ class FormatCompiler
   }
 
   /**
-   * @brief 指出某个操作码族需要打开哪一个 writer-profile 位。 / Says which writer-profile
+   * @brief 指出某个操作码族需要打开哪一个 writer-profile 位 / Says which writer-profile
    * bit one opcode family needs.
    * @param op 待分类的操作码 / Opcode to classify
    * @return 对应的窄路径 profile 位；无需窄路径时返回 `None` / Required narrow-path
@@ -204,7 +204,7 @@ class FormatCompiler
   }
 
   /**
-   * @brief 为一个字段选择仍能正确打印它的最小操作码。 / Chooses the smallest opcode that
+   * @brief 为一个字段选择仍能正确打印它的最小操作码 / Chooses the smallest opcode that
    * can still print this field correctly.
    */
   [[nodiscard]] static consteval FormatOp FastFieldOp(const FormatField& field)
@@ -271,7 +271,7 @@ class FormatCompiler
   }
 
   /**
-   * @brief 判断字段是否满足裸整数快路径条件。 / Tests whether one field matches the raw
+   * @brief 判断字段是否满足裸整数快路径条件 / Tests whether one field matches the raw
    * integer fast-path gate.
    */
   [[nodiscard]] static consteval bool IsRawIntegerField(const FormatField& field)
@@ -281,7 +281,7 @@ class FormatCompiler
   }
 
   /**
-   * @brief 判断字段是否满足裸文本快路径条件。 / Tests whether one field matches the raw
+   * @brief 判断字段是否满足裸文本快路径条件 / Tests whether one field matches the raw
    * text fast-path gate.
    */
   [[nodiscard]] static consteval bool IsRawTextField(const FormatField& field)
@@ -293,7 +293,7 @@ class FormatCompiler
   }
 
   /**
-   * @brief 由前端文本/字段事件直接喂给的单遍临时构建器。 / One-pass scratch builder fed
+   * @brief 由前端文本/字段事件直接喂给的单遍临时构建器 / One-pass scratch builder fed
    * directly by frontend text/field events.
    */
   struct ScratchBuilder
@@ -315,7 +315,7 @@ class FormatCompiler
     Error frontend_error = Error::None;  ///< first frontend failure / 首个前端失败原因
 
     /**
-     * @brief 将单个字面文本片段追加到临时缓冲区。 / Appends one literal-text span into
+     * @brief 将单个字面文本片段追加到临时缓冲区 / Appends one literal-text span into
      * the scratch buffers.
      * @param offset Text offset inside `Frontend::SourceData()`. /
      *        文本在 `Frontend::SourceData()` 中的偏移。
@@ -372,7 +372,7 @@ class FormatCompiler
     }
 
     /**
-     * @brief 将一个值字段追加到临时字节流和临时参数表中。 / Appends one value field into
+     * @brief 将一个值字段追加到临时字节流和临时参数表中 / Appends one value field into
      * the scratch byte stream and scratch argument table.
      * @param field Shared field record produced by the frontend. /
      *        前端产出的共享字段记录。
@@ -438,7 +438,7 @@ class FormatCompiler
     }
 
     /**
-     * @brief 把临时缓冲打包成最终精确尺寸的编译格式。 / Packs the scratch buffers into
+     * @brief 把临时缓冲打包成最终精确尺寸的编译格式 / Packs the scratch buffers into
      * the final exact-size compiled format.
      *
      * TextRef records store temporary offsets relative to the text scratch pool.
@@ -536,7 +536,7 @@ class FormatCompiler
 
  public:
   /**
-   * @brief 把一个前端编译成最终字节流、参数表和 writer 摘要。 / Compiles one frontend
+   * @brief 把一个前端编译成最终字节流、参数表和 writer 摘要 / Compiles one frontend
    * into the final byte stream, argument table, and writer profile.
    * @return Returns the final compiled result object, or a failed result that
    *         carries the first compile-time error. / 返回最终编译结果对象；

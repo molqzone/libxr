@@ -18,7 +18,7 @@ namespace LibXR
  * 设计目标与 STM32 CAN 驱动行为保持一致。
  * Designed to keep behavior aligned with the STM32 CAN driver.
  *
- * @note 基于 WCH StdPeriph CAN 接口实现。 / Implemented on top of WCH StdPeriph CAN APIs.
+ * @note 基于 WCH StdPeriph CAN 接口实现 / Implemented on top of WCH StdPeriph CAN APIs.
  */
 class CH32CAN : public CAN
 {
@@ -91,11 +91,11 @@ class CH32CAN : public CAN
   uint8_t fifo_{0};
   uint8_t filter_bank_{0};
 
-  /// 发送软件队列。 TX software queue.
+  /// 发送软件队列 / TX software queue.
   MPMCQueue<ClassicPack> tx_queue_;
-  /// 待重试帧有效标记。 Pending retry frame flag.
+  /// 待重试帧有效标记 / Pending retry frame flag.
   bool tx_retry_valid_{false};
-  /// 待重试帧。 Pending retry frame.
+  /// 待重试帧 / Pending retry frame.
   ClassicPack tx_retry_pack_{};
 
   std::atomic<uint32_t> tx_lock_{0};

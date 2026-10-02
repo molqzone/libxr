@@ -7,7 +7,7 @@
 #include <type_traits>
 
 /**
- * @brief 供直接包含头文件的用户使用的打印功能默认值。 / Print feature defaults for direct
+ * @brief 供直接包含头文件的用户使用的打印功能默认值 / Print feature defaults for direct
  * header consumers.
  *
  * CMake exports the same names as 0 or 1 target compile definitions. When the
@@ -196,7 +196,7 @@ inline constexpr bool enable_explicit_argument_indexing =
 namespace LibXR::Print
 {
 /**
- * @brief 编译期解析层与运行期写出层之间共用的打印格式协议。 / Shared print-format
+ * @brief 编译期解析层与运行期写出层之间共用的打印格式协议 / Shared print-format
  * protocol used between compile-time parsing and runtime writing.
  *
  * The frontends first decide:
@@ -214,7 +214,7 @@ namespace LibXR::Print
  * 运行期 writer 随后直接读取这套协议，不再重新解析原始格式串。
  */
 /**
- * @brief 每个运行期参数附带的编译期匹配规则。 / Compile-time argument matching rules
+ * @brief 每个运行期参数附带的编译期匹配规则 / Compile-time argument matching rules
  * attached to each runtime argument.
  */
 enum class FormatArgumentRule : uint8_t
@@ -245,7 +245,7 @@ enum class FormatArgumentRule : uint8_t
 };
 
 /**
- * @brief 保存在值记录字段描述字节中的位标志。 / Bit flags stored in a value record's
+ * @brief 保存在值记录字段描述字节中的位标志 / Bit flags stored in a value record's
  * field-spec byte.
  *
  * These bits are not stored in the record-op byte, so their numeric values may
@@ -264,7 +264,7 @@ enum class FormatFlag : uint8_t
 };
 
 /**
- * @brief Writer 消费的运行期字节码操作。 / Runtime bytecode operations consumed by
+ * @brief Writer 消费的运行期字节码操作 / Runtime bytecode operations consumed by
  * Writer.
  *
  * Small common cases lower directly to narrow opcodes with only the immediates
@@ -342,7 +342,7 @@ enum class FormatOp : uint8_t
 }
 
 /**
- * @brief 编译期分析和运行期分发共用的语义处理类别。 / Semantic handler categories used by
+ * @brief 编译期分析和运行期分发共用的语义处理类别 / Semantic handler categories used by
  * compile-time analysis and runtime dispatch.
  */
 enum class FormatType : uint8_t
@@ -388,7 +388,7 @@ enum class FormatType : uint8_t
 };
 
 /**
- * @brief 运行期参数的打包存储类别。 / Packed storage categories for runtime arguments.
+ * @brief 运行期参数的打包存储类别 / Packed storage categories for runtime arguments.
  *
  * This only answers "how is one argument stored in the packed argument blob".
  * It does not describe how the final text is rendered.
@@ -409,7 +409,7 @@ enum class FormatPackKind : uint8_t
 };
 
 /**
- * @brief 编译期选出的精确运行期执行器配置。 / Precise runtime executor profiles selected
+ * @brief 编译期选出的精确运行期执行器配置 / Precise runtime executor profiles selected
  * at compile time.
  *
  * The low bits describe which narrow fast-path families appear in the bytecode.
@@ -525,7 +525,7 @@ static_assert(static_cast<uint32_t>(FormatProfile::Generic) ==
               ((uint32_t{1} << 26U) - (uint32_t{1} << 2U)));
 
 /**
- * @brief Writer 消费的编译格式运行期协议。 / Compiled-format runtime contract consumed by
+ * @brief Writer 消费的编译格式运行期协议 / Compiled-format runtime contract consumed by
  * Writer.
  *
  * A compiled format source always provides Codes(), one contiguous uint8_t byte
@@ -542,7 +542,7 @@ static_assert(static_cast<uint32_t>(FormatProfile::Generic) ==
  */
 
 /**
- * @brief 每个参数对应的元信息，同时用于编译期类型检查和运行期打包。 / Per-argument
+ * @brief 每个参数对应的元信息，同时用于编译期类型检查和运行期打包 / Per-argument
  * metadata used both for compile-time type checking and runtime packing.
  *
  * `pack` says how the runtime argument blob stores this argument.
@@ -560,7 +560,7 @@ static_assert(sizeof(FormatArgumentInfo) == 2,
               "LibXR::Print::FormatArgumentInfo must stay tightly packed");
 
 /**
- * @brief 一条已经决定完毕、运行期 writer 知道如何打印的值字段。 / One fully-decided value
+ * @brief 一条已经决定完毕、运行期 writer 知道如何打印的值字段 / One fully-decided value
  * field that the runtime writer knows how to print.
  *
  * It says:
@@ -587,7 +587,7 @@ struct FormatField
 };
 
 /**
- * @brief 返回一个运行期已打包参数会占多少字节。 / Returns how many bytes one packed
+ * @brief 返回一个运行期已打包参数会占多少字节 / Returns how many bytes one packed
  * runtime argument occupies.
  *
  * This answers "how big is one packed argument", not "how long is one opcode".

@@ -87,21 +87,21 @@ void UpdateDisplayPosition()
 /**
  * @brief  检查是否可以显示字符
  *         Checks if a character can be displayed
- * @return bool 是否可以显示字符 Whether the character can be displayed
+ * @return bool 是否可以显示字符 / Whether the character can be displayed
  */
 bool CanDisplayChar() { return input_line_.EmptySize() > 1; }
 
 /**
  * @brief  检查是否可以删除字符
  *         Checks if a character can be deleted
- * @return bool 是否可以删除字符 Whether the character can be deleted
+ * @return bool 是否可以删除字符 / Whether the character can be deleted
  */
 bool CanDeleteChar() { return input_line_.Size() + offset_ > 0; }
 
 /**
  * @brief  向输入行中添加字符，支持在光标位置插入
  *         Adds a character to the input line, supports insertion at the cursor position
- * @param  data 要添加的字符 The character to add
+ * @param  data 要添加的字符 / The character to add
  */
 void AddCharToInputLine(char data)
 {
@@ -120,7 +120,7 @@ void AddCharToInputLine(char data)
  * @brief  在终端上显示字符，并根据历史记录模式进行相应操作
  *         Displays a character on the terminal and updates accordingly if history mode
  * is active
- * @param  data 要显示的字符 The character to display
+ * @param  data 要显示的字符 / The character to display
  */
 void DisplayChar(char data)
 {

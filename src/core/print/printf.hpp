@@ -189,30 +189,30 @@ struct Printf::Compiled
 
  public:
   /**
-   * @brief 返回运行期 writer 最终会执行的字节流。 / Returns the final byte stream that
+   * @brief 返回运行期 writer 最终会执行的字节流 / Returns the final byte stream that
    * the runtime writer will execute.
    */
   inline static constexpr auto codes = result.codes;
   /**
-   * @brief 返回当前格式需要哪些 writer 分支的编译期摘要。 / Returns the compile-time
+   * @brief 返回当前格式需要哪些 writer 分支的编译期摘要 / Returns the compile-time
    * summary of which writer branches this format needs.
    */
   inline static constexpr FormatProfile profile = result.profile;
 
   /**
-   * @brief 返回运行期参数打包时要按字段顺序读取的参数列表。 / Returns the field-ordered
+   * @brief 返回运行期参数打包时要按字段顺序读取的参数列表 / Returns the field-ordered
    * argument list the runtime packer will follow.
    */
   [[nodiscard]] static constexpr auto ArgumentList() { return result.arg_info; }
 
   /**
-   * @brief 返回每个字段对应的是第几个源参数。 / Returns, for each field, which source
+   * @brief 返回每个字段对应的是第几个源参数 / Returns, for each field, which source
    * argument index it refers to.
    */
   [[nodiscard]] static constexpr auto ArgumentOrder() { return source_analysis.order; }
 
   /**
-   * @brief 返回仅供编译期类型匹配使用的源参数列表。 / Returns the source-argument list
+   * @brief 返回仅供编译期类型匹配使用的源参数列表 / Returns the source-argument list
    * used only for compile-time type matching.
    */
   [[nodiscard]] static constexpr auto SourceArgumentList()
@@ -221,19 +221,19 @@ struct Printf::Compiled
   }
 
   /**
-   * @brief 返回与 `codes` 相同的最终字节流。 / Returns the same final byte stream as
+   * @brief 返回与 `codes` 相同的最终字节流 / Returns the same final byte stream as
    * `codes`.
    */
   [[nodiscard]] static constexpr const auto& Codes() { return codes; }
 
   /**
-   * @brief 返回当前编译格式携带的 writer 分支摘要。 / Returns the writer-branch summary
+   * @brief 返回当前编译格式携带的 writer 分支摘要 / Returns the writer-branch summary
    * carried by this compiled format.
    */
   [[nodiscard]] static constexpr FormatProfile Profile() { return profile; }
 
   /**
-   * @brief 判断 `Args...` 是否就是当前编译格式期望的那组 C++ 参数类型。 / Returns whether
+   * @brief 判断 `Args...` 是否就是当前编译格式期望的那组 C++ 参数类型 / Returns whether
    * `Args...` are exactly the C++ argument types this compiled format expects.
    * @tparam Args C++ argument types to compare. / 待比较的 C++ 实参类型列表。
    * @return Returns `true` when the type list matches exactly, otherwise

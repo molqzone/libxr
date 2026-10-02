@@ -668,27 +668,27 @@ class RuntimeStringView
     }
   }
 
-  /// 长期保留的 NUL 结尾存储；对象析构时不释放。 / Retained NUL-terminated storage; not
+  /// 长期保留的 NUL 结尾存储；对象析构时不释放 / Retained NUL-terminated storage; not
   /// released by the destructor.
   char* data_ = nullptr;
-  /// 不含结尾 NUL 的当前可见文本长度。 / Current visible payload size excluding the
+  /// 不含结尾 NUL 的当前可见文本长度 / Current visible payload size excluding the
   /// trailing NUL.
   size_t size_ = 0;
-  /// 不含结尾 NUL 的已探测/分配容量。 / Probed/allocated payload capacity excluding the
+  /// 不含结尾 NUL 的已探测/分配容量 / Probed/allocated payload capacity excluding the
   /// trailing NUL.
   size_t capacity_ = 0;
-  /// 最近一次构造或重写状态。 / Status of the latest construction or rewrite.
+  /// 最近一次构造或重写状态 / Status of the latest construction or rewrite.
   ErrorCode status_ = ErrorCode::OK;
 };
 
-/// 单参数文本构造推导为普通保留字符串。 / Single text argument deduces a plain retained
+/// 单参数文本构造推导为普通保留字符串 / Single text argument deduces a plain retained
 /// string.
 RuntimeStringView(std::string_view) -> RuntimeStringView<>;
-/// C 字符串构造推导为普通保留字符串。 / C-string construction deduces a plain retained
+/// C 字符串构造推导为普通保留字符串 / C-string construction deduces a plain retained
 /// string.
 RuntimeStringView(const char*) -> RuntimeStringView<>;
 
-/// 多片段构造推导为普通拼接字符串。 / Multi-part construction deduces a plain
+/// 多片段构造推导为普通拼接字符串 / Multi-part construction deduces a plain
 /// concatenated string.
 template <typename First, typename Second, typename... Rest>
 RuntimeStringView(First&&, Second&&, Rest&&...) -> RuntimeStringView<>;

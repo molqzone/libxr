@@ -87,37 +87,37 @@ class Writer::Executor
 #endif
 
   /**
-   * @brief 单个原始 uint32_t 十进制字段的快路径。 / Fast path for one raw uint32_t
+   * @brief 单个原始 uint32_t 十进制字段的快路径 / Fast path for one raw uint32_t
    * decimal field.
    */
   [[nodiscard]] ErrorCode WriteU32Dec(uint32_t value);
 
   /**
-   * @brief 单个原始 int32_t 十进制字段的快路径。 / Fast path for one raw int32_t decimal
+   * @brief 单个原始 int32_t 十进制字段的快路径 / Fast path for one raw int32_t decimal
    * field.
    */
   [[nodiscard]] ErrorCode WriteI32Dec(int32_t value);
 
   /**
-   * @brief 单个原始 uint32_t 非十进制字段的快路径。 / Fast path for one raw uint32_t
+   * @brief 单个原始 uint32_t 非十进制字段的快路径 / Fast path for one raw uint32_t
    * non-decimal field.
    */
   template <uint8_t Base, bool UpperCase = false>
   [[nodiscard]] ErrorCode WriteU32Base(uint32_t value);
 
   /**
-   * @brief 单个零填充 uint32_t 十进制字段的快路径。 / Fast path for one zero-padded
+   * @brief 单个零填充 uint32_t 十进制字段的快路径 / Fast path for one zero-padded
    * uint32_t decimal field.
    */
   [[nodiscard]] ErrorCode WriteU32ZeroPadWidth(uint8_t width, uint32_t value);
 
   /**
-   * @brief 单个原始字符串参数的快路径。 / Fast path for one raw string argument.
+   * @brief 单个原始字符串参数的快路径 / Fast path for one raw string argument.
    */
   [[nodiscard]] ErrorCode WriteStringRaw(std::string_view text);
 
   /**
-   * @brief 单个原始字符参数的快路径。 / Fast path for one raw character argument.
+   * @brief 单个原始字符参数的快路径 / Fast path for one raw character argument.
    */
   [[nodiscard]] ErrorCode WriteCharacterRaw(char ch);
 
