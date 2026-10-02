@@ -330,26 +330,27 @@ void test_message_topic_contract()
   auto topic = LibXR::Topic::CreateTopic<double>("contract_tp", &domain);
   const auto key = static_cast<unsigned>(LibXR::CRC32::Calculate("contract_tp", 11));
 
-  // 报错写出 topic 名称（调用方有名称时）、CRC32 键和两边的字节数与对齐。
-  // The message names the topic (when the call site has the name), its CRC32 key, and
-  // both sizes and alignments.
+  // 报错写出 topic 名称（调用方有名称时）、CRC32 键和两边的字节数与对齐；int64_t 与
+  // double 字节数和对齐相同，报错仍写明类型不同。 The message names the topic (when the
+  // call site has the name), its CRC32 key, and both sizes and alignments; int64_t and
+  // double share them, and the message still says the types differ.
   char named_float[160];
   std::snprintf(
       named_float, sizeof(named_float),
-      "Topic type mismatch: topic \"contract_tp\" (key %u) carries 8 bytes align 8, "
-      "requested 4 bytes align 4\r\n",
+      "Topic type mismatch: topic \"contract_tp\" (key %u): payload type differs "
+      "(topic 8 bytes align 8, requested 4 bytes align 4)\r\n",
       key);
   char named_int64[160];
   std::snprintf(
       named_int64, sizeof(named_int64),
-      "Topic type mismatch: topic \"contract_tp\" (key %u) carries 8 bytes align 8, "
-      "requested 8 bytes align 8\r\n",
+      "Topic type mismatch: topic \"contract_tp\" (key %u): payload type differs "
+      "(topic 8 bytes align 8, requested 8 bytes align 8)\r\n",
       key);
   char unnamed_float[160];
   std::snprintf(
       unnamed_float, sizeof(unnamed_float),
-      "Topic type mismatch: topic key %u carries 8 bytes align 8, requested 4 bytes "
-      "align 4\r\n",
+      "Topic type mismatch: topic key %u: payload type differs (topic 8 bytes align "
+      "8, requested 4 bytes align 4)\r\n",
       key);
   char callback_float[160];
   std::snprintf(

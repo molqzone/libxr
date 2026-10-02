@@ -184,16 +184,16 @@ void Topic::RequireTypeContract(TopicHandle topic, const char* name,
     if (name != nullptr)
     {
       STDIO::Print<
-          "Topic type mismatch: topic \"{}\" (key {}) carries {} bytes align {}, "
-          "requested {} bytes align {}\r\n">(
+          "Topic type mismatch: topic \"{}\" (key {}): payload type differs (topic {} "
+          "bytes align {}, requested {} bytes align {})\r\n">(
           name, data.crc32, data.payload_size, data.payload_alignment,
           static_cast<uint32_t>(payload_size), static_cast<uint32_t>(payload_alignment));
     }
     else
     {
       STDIO::Print<
-          "Topic type mismatch: topic key {} carries {} bytes align {}, "
-          "requested {} bytes align {}\r\n">(
+          "Topic type mismatch: topic key {}: payload type differs (topic {} bytes align "
+          "{}, requested {} bytes align {})\r\n">(
           data.crc32, data.payload_size, data.payload_alignment,
           static_cast<uint32_t>(payload_size), static_cast<uint32_t>(payload_alignment));
     }
