@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "libxr.hpp"
 #include "libxr_def.hpp"
@@ -236,28 +237,77 @@ void TestTopicMutationAndQueueDrop()
 
 constexpr int TOPIC_FATAL_EXIT = 42;
 
+// 子进程的 STDIO 输出和交给父进程的系统管道写端。
+// The child's STDIO output and the write end of the OS pipe to the parent.
+LibXR::Pipe* topic_fatal_output = nullptr;
+int topic_fatal_report_fd = -1;
+
 template <typename Func>
-void ExpectTopicFatal(bool expect_fatal, Func&& func)
+void ExpectTopicFatal(const char* expected_message, Func&& func)
 {
-  // 在子进程里执行一次初始化操作，致命错误回调以固定退出码结束子进程。
-  // Run one init operation in a child; the fatal callback ends it with a fixed code.
+  // 在子进程里执行一次初始化操作。子进程没有 STDIO 输出线程，STDIO 改写到 Pipe；致命错误
+  // 回调把其中的报错交给父进程，再以固定退出码结束。expected_message 为空表示不应出错。
+  // Run one init operation in a child. The child has no STDIO output thread, so STDIO
+  // writes to a Pipe; the fatal callback hands that message to the parent and exits with
+  // a fixed code. A null expected_message means no error is expected.
+  int report[2] = {-1, -1};
+  TEST_ASSERT(pipe(report) == 0);
   std::fflush(nullptr);
   pid_t child = fork();
   TEST_ASSERT(child >= 0);
 
   if (child == 0)
   {
+    close(report[0]);
+    topic_fatal_report_fd = report[1];
+    static LibXR::Pipe output(256);
+    static LibXR::Mutex output_mutex;
+    topic_fatal_output = &output;
+    LibXR::STDIO::write_ = &output.GetWritePort();
+    LibXR::STDIO::write_mutex_ = &output_mutex;
+    LibXR::STDIO::write_stream_ = nullptr;
     auto cb = LibXR::Assert::FatalCallback::Create(
-        [](bool, int code, const char*, uint32_t) { _exit(code); }, TOPIC_FATAL_EXIT);
+        [](bool, int code, const char*, uint32_t)
+        {
+          auto& read = topic_fatal_output->GetReadPort();
+          uint8_t text[256] = {};
+          const size_t size = read.Size();
+          LibXR::ReadOperation op;
+          if (size > 0 && read(LibXR::RawData{text, size}, op) == LibXR::ErrorCode::OK)
+          {
+            const ssize_t sent = write(topic_fatal_report_fd, text, size);
+            UNUSED(sent);
+          }
+          _exit(code);
+        },
+        TOPIC_FATAL_EXIT);
     LibXR::Assert::RegisterFatalErrorCallback(cb);
     func();
     _exit(0);
   }
 
+  close(report[1]);
+  char message[256] = {};
+  size_t length = 0;
+  ssize_t got = 0;
+  while ((got = read(report[0], message + length, sizeof(message) - 1 - length)) > 0)
+  {
+    length += static_cast<size_t>(got);
+  }
+  close(report[0]);
+
   int status = 0;
   TEST_ASSERT(waitpid(child, &status, 0) == child);
   TEST_ASSERT(WIFEXITED(status));
-  TEST_ASSERT(WEXITSTATUS(status) == (expect_fatal ? TOPIC_FATAL_EXIT : 0));
+  TEST_ASSERT(WEXITSTATUS(status) == (expected_message ? TOPIC_FATAL_EXIT : 0));
+  // 第一行是 topic 的报错；之后是致命错误处理打印的源码位置。
+  // The first line is the topic message; the fatal handler's source location follows.
+  const char* line_end = std::strstr(message, "\r\n");
+  const size_t first_line =
+      line_end ? static_cast<size_t>(line_end - message) + 2 : length;
+  const char* expected = expected_message ? expected_message : "";
+  TEST_ASSERT(first_line == std::strlen(expected));
+  TEST_ASSERT(std::strncmp(message, expected, first_line) == 0);
 }
 
 }  // namespace
@@ -278,21 +328,57 @@ void test_message_topic_contract()
 
   auto domain = LibXR::Topic::Domain("message_topic_contract_domain");
   auto topic = LibXR::Topic::CreateTopic<double>("contract_tp", &domain);
+  const auto key = static_cast<unsigned>(LibXR::CRC32::Calculate("contract_tp", 11));
+
+  // 报错写出 topic 名称（调用方有名称时）、CRC32 键和两边的字节数与对齐。
+  // The message names the topic (when the call site has the name), its CRC32 key, and
+  // both sizes and alignments.
+  char named_float[160];
+  std::snprintf(
+      named_float, sizeof(named_float),
+      "Topic type mismatch: topic \"contract_tp\" (key %u) carries 8 bytes align 8, "
+      "requested 4 bytes align 4\r\n",
+      key);
+  char named_int64[160];
+  std::snprintf(
+      named_int64, sizeof(named_int64),
+      "Topic type mismatch: topic \"contract_tp\" (key %u) carries 8 bytes align 8, "
+      "requested 8 bytes align 8\r\n",
+      key);
+  char unnamed_float[160];
+  std::snprintf(
+      unnamed_float, sizeof(unnamed_float),
+      "Topic type mismatch: topic key %u carries 8 bytes align 8, requested 4 bytes "
+      "align 4\r\n",
+      key);
+  char callback_float[160];
+  std::snprintf(
+      callback_float, sizeof(callback_float),
+      "Topic type mismatch: callback payload type differs from topic key %u (8 bytes "
+      "align 8)\r\n",
+      key);
+  char single_publisher[160];
+  std::snprintf(
+      single_publisher, sizeof(single_publisher),
+      "Topic publisher mismatch: topic \"contract_tp\" (key %u) was created for a "
+      "single publisher, multi_publisher requested\r\n",
+      key);
 
   ExpectTopicFatal(
-      false, [&] { (void)LibXR::Topic::FindOrCreate<double>("contract_tp", &domain); });
+      nullptr, [&] { (void)LibXR::Topic::FindOrCreate<double>("contract_tp", &domain); });
+  ExpectTopicFatal(named_float, [&]
+                   { (void)LibXR::Topic::CreateTopic<float>("contract_tp", &domain); });
   ExpectTopicFatal(
-      true, [&] { (void)LibXR::Topic::CreateTopic<float>("contract_tp", &domain); });
-  ExpectTopicFatal(
-      true, [&] { (void)LibXR::Topic::FindOrCreate<int64_t>("contract_tp", &domain); });
-  ExpectTopicFatal(true,
+      named_int64,
+      [&] { (void)LibXR::Topic::FindOrCreate<int64_t>("contract_tp", &domain); });
+  ExpectTopicFatal(unnamed_float,
                    [&]
                    {
                      static float value = 0.0f;
                      LibXR::Topic::SyncSubscriber<float> suber(topic, value);
                      UNUSED(suber);
                    });
-  ExpectTopicFatal(true,
+  ExpectTopicFatal(callback_float,
                    [&]
                    {
                      auto cb = LibXR::Topic::Callback::Create([](bool, void*, float&) {},
@@ -300,9 +386,9 @@ void test_message_topic_contract()
                      topic.RegisterCallback(cb);
                    });
   ExpectTopicFatal(
-      true,
+      single_publisher,
       [&] { (void)LibXR::Topic::CreateTopic<double>("contract_tp", &domain, true); });
   ExpectTopicFatal(
-      true,
+      single_publisher,
       [&] { (void)LibXR::Topic::FindOrCreate<double>("contract_tp", &domain, true); });
 }
