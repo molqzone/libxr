@@ -81,18 +81,59 @@ class FlashOperationGuard
   bool d_cache_enabled_ = false;
 #endif
 };
+
+/** @brief 扇区表的结束地址 / End address of the sector table */
+uint32_t TableEnd(const FlashRegion* regions, size_t region_count)
+{
+  const auto& last = regions[region_count - 1];
+  return last.address + last.sector_size * last.sector_count;
+}
+
+/** @brief 从 address 开始的扇区的字节数 / Size of the sector starting at address */
+uint32_t SectorSizeAt(const FlashRegion* regions, size_t region_count, uint32_t address)
+{
+  for (size_t i = 0; i < region_count; ++i)
+  {
+    const auto& region = regions[i];
+    if (address >= region.address &&
+        address - region.address < region.sector_size * region.sector_count)
+    {
+      REQUIRE((address - region.address) % region.sector_size == 0U);
+      return region.sector_size;
+    }
+  }
+  REQUIRE(false);
+  return 0U;
+}
+
+/** @brief 倒数第二个扇区的地址 / Address of the second-to-last sector */
+uint32_t SecondToLastSector(const FlashRegion* regions, size_t region_count)
+{
+  const auto& last = regions[region_count - 1];
+  if (last.sector_count >= 2U)
+  {
+    return last.address + last.sector_size * (last.sector_count - 2U);
+  }
+  REQUIRE(region_count >= 2U);
+  const auto& previous = regions[region_count - 2];
+  return previous.address + previous.sector_size * (previous.sector_count - 1U);
+}
 }  // namespace
 
-STM32Flash::STM32Flash(const FlashSector* sectors, size_t sector_count,
-                       size_t start_sector)
-    : Flash(sectors[start_sector - 1].size, DetermineMinWriteSize(),
-            {reinterpret_cast<void*>(sectors[start_sector - 1].address),
-             sectors[sector_count - 1].address - sectors[start_sector - 1].address +
-                 sectors[sector_count - 1].size}),
-      sectors_(sectors),
-      base_address_(sectors[start_sector - 1].address),
+STM32Flash::STM32Flash(const FlashRegion* regions, size_t region_count,
+                       uint32_t start_address)
+    : Flash(SectorSizeAt(regions, region_count, start_address), DetermineMinWriteSize(),
+            {reinterpret_cast<void*>(start_address),
+             TableEnd(regions, region_count) - start_address}),
+      regions_(regions),
+      base_address_(start_address),
       program_type_(DetermineProgramType()),
-      sector_count_(sector_count)
+      region_count_(region_count)
+{
+}
+
+STM32Flash::STM32Flash(const FlashRegion* regions, size_t region_count)
+    : STM32Flash(regions, region_count, SecondToLastSector(regions, region_count))
 {
 }
 
@@ -108,70 +149,75 @@ ErrorCode STM32Flash::Erase(size_t offset, size_t size)
 
   FlashOperationGuard operation;
 
-  // 表按地址排列；bank_entries 记录每个 bank 中已经走过的表项数，即下一项在该 bank 内的
-  // 序号。bank 2 的起点由表给出，小容量型号上它与 bank 1 之间可能有空洞（如 H743xG 在
-  // 0x08100000，G474xC 在 0x08040000）。
-  // The table is ordered by address; bank_entries counts the entries already passed in
-  // each bank, which is the next entry's number within that bank. The table gives where
-  // bank 2 starts, after a gap on smaller parts (H743xG at 0x08100000, G474xC at
-  // 0x08040000).
+  // 表按地址排列；index 是跨段的扇区序号，bank_entries 记录每个 bank 中已经走过的扇区
+  // 数，即下一个扇区在该 bank 内的序号。bank 2 的起点由表给出，小容量型号上它与 bank 1
+  // 之间可能有空洞（如 H743xG 在 0x08100000，G474xC 在 0x08040000）。
+  // The table is ordered by address; index is the sector number across runs, and
+  // bank_entries counts the sectors already passed in each bank, which is the next
+  // sector's number within that bank. The table gives where bank 2 starts, after a gap on
+  // smaller parts (H743xG at 0x08100000, G474xC at 0x08040000).
   uint32_t bank_entries[2] = {0U, 0U};
-  for (size_t i = 0; i < sector_count_; ++i)
+  [[maybe_unused]] uint32_t index = 0U;
+  for (size_t r = 0; r < region_count_; ++r)
   {
-    const auto& sector = sectors_[i];
+    const auto& region = regions_[r];
+    for (uint32_t k = 0; k < region.sector_count; ++k, ++index)
+    {
+      const uint32_t address = region.address + region.sector_size * k;
 #if defined(FLASH_BANK_2)
-    const size_t bank_slot = (STM32FlashBankOf(sector.address) == FLASH_BANK_2) ? 1U : 0U;
+      const size_t bank_slot = (STM32FlashBankOf(address) == FLASH_BANK_2) ? 1U : 0U;
 #else
-    const size_t bank_slot = 0U;
+      const size_t bank_slot = 0U;
 #endif
-    [[maybe_unused]] const uint32_t number_in_bank = bank_entries[bank_slot]++;
-    if (sector.address + sector.size <= start_addr)
-    {
-      continue;
-    }
-    if (sector.address >= end_addr)
-    {
-      break;
-    }
-    FLASH_EraseInitTypeDef erase_init = {};
+      [[maybe_unused]] const uint32_t number_in_bank = bank_entries[bank_slot]++;
+      if (address + region.sector_size <= start_addr)
+      {
+        continue;
+      }
+      if (address >= end_addr)
+      {
+        return ErrorCode::OK;
+      }
+      FLASH_EraseInitTypeDef erase_init = {};
 
 #if defined(FLASH_TYPEERASE_PAGES) && defined(FLASH_PAGE_SIZE)  // STM32F1/G4... series
-    // 有 Page 字段的系列（G0、G4、L4、L5、U5 等）按 bank 内页号编号；其余系列用页地址。
-    // Families with a Page field (G0, G4, L4, L5, U5, ...) number pages within each
-    // bank; the others take the page address.
-    erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
-    SetNbPages(erase_init, sector.address, number_in_bank);
-    erase_init.NbPages = 1;
-    SetBanks(erase_init, sector.address);
+      // 有 Page 字段的系列（G0、G4、L4、L5、U5 等）按 bank 内页号编号；其余系列用页地址。
+      // Families with a Page field (G0, G4, L4, L5, U5, ...) number pages within each
+      // bank; the others take the page address.
+      erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
+      SetNbPages(erase_init, address, number_in_bank);
+      erase_init.NbPages = 1;
+      SetBanks(erase_init, address);
 #elif defined(FLASH_TYPEERASE_SECTORS)  // STM32F4/F7/H7... series
-    erase_init.TypeErase = FLASH_TYPEERASE_SECTORS;
+      erase_init.TypeErase = FLASH_TYPEERASE_SECTORS;
 #if defined(FLASH_SECTOR_SIZE)
-    // H5、H7 的扇区大小一致，按 bank 内扇区号编号。
-    // H5 and H7 have uniform sectors numbered within each bank.
-    erase_init.Sector = number_in_bank;
+      // H5、H7 的扇区大小一致，按 bank 内扇区号编号。
+      // H5 and H7 have uniform sectors numbered within each bank.
+      erase_init.Sector = number_in_bank;
 #elif defined(FLASH_SECTOR_TOTAL)
-    // F2、F4、F7 的扇区号跨两个 bank 连续编号，等于表中的序号。
-    // F2, F4 and F7 number sectors across both banks, as the table index does.
-    erase_init.Sector = static_cast<uint32_t>(i);
+      // F2、F4、F7 的扇区号跨两个 bank 连续编号，等于跨段的扇区序号。
+      // F2, F4 and F7 number sectors across both banks, as the index across runs does.
+      erase_init.Sector = index;
 #else
 #error "No supported Flash sector numbering defined"
 #endif
-    erase_init.NbSectors = 1;
+      erase_init.NbSectors = 1;
 #if defined(FLASH_BANK_1)
-    erase_init.Banks = STM32FlashBankOf(sector.address);
+      erase_init.Banks = STM32FlashBankOf(address);
 #endif
 #if defined(FLASH_CR_PSIZE)
-    erase_init.VoltageRange = FLASH_VOLTAGE_RANGE_1;
+      erase_init.VoltageRange = FLASH_VOLTAGE_RANGE_1;
 #endif
 #else
-    return ErrorCode::NOT_SUPPORT;
+      return ErrorCode::NOT_SUPPORT;
 #endif
 
-    uint32_t error = 0;
-    HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase_init, &error);
-    if (status != HAL_OK || error != 0xFFFFFFFFU)
-    {
-      return ErrorCode::FAILED;
+      uint32_t error = 0;
+      HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase_init, &error);
+      if (status != HAL_OK || error != 0xFFFFFFFFU)
+      {
+        return ErrorCode::FAILED;
+      }
     }
   }
 
@@ -252,8 +298,7 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
 bool STM32Flash::IsInRange(uint32_t addr, size_t size) const
 {
   const uint32_t BEGIN = base_address_;
-  const uint32_t LIMIT =
-      sectors_[sector_count_ - 1].address + sectors_[sector_count_ - 1].size;
+  const uint32_t LIMIT = TableEnd(regions_, region_count_);
   const uint32_t END = addr + size;
   return (addr >= BEGIN) && (END <= LIMIT) && (END >= addr);  // 最后一项防溢出
 }

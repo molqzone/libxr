@@ -11,6 +11,19 @@ namespace LibXR
 {
 
 /**
+ * @brief 一段连续、大小相同的扇区 / A run of contiguous sectors of equal size
+ * @note 驱动的扇区表由若干段组成，按地址顺序列出整片 Flash。
+ *       A driver's sector table is made of such runs and lists the whole Flash in address
+ *       order.
+ */
+struct FlashRegion
+{
+  uint32_t address;       ///< 第一个扇区的地址 / Address of the first sector
+  uint32_t sector_size;   ///< 每个扇区的字节数 / Bytes per sector
+  uint32_t sector_count;  ///< 扇区个数 / Number of sectors
+};
+
+/**
  * @class Flash
  * @brief Abstract base class representing a flash memory interface.
  * 抽象基类，表示闪存接口。
