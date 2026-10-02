@@ -274,8 +274,8 @@ if(XROBOT_MODULES_DIR)
   endif()
 
   # User/xrobot_main.hpp names its inputs in "// xrobot:" lines: exactly one
-  # `config "<path>"` and one or more `depends "<path>"`. Paths are relative to the
-  # header directory unless absolute.
+  # `config "<path>"`, then `entry "<path>"` and `depends "<path>"` lines, and a
+  # `digest <sha256>` line. Paths are relative to the header directory unless absolute.
   set(_xr_main_header "${_xr_bsp_root}/User/xrobot_main.hpp")
   if(NOT EXISTS "${_xr_main_header}")
     message(
@@ -291,11 +291,14 @@ if(XROBOT_MODULES_DIR)
   )
 
   get_filename_component(_xr_main_header_dir "${_xr_main_header}" DIRECTORY)
-  file(STRINGS "${_xr_main_header}" _xr_directives REGEX "^// xrobot:")
+  file(STRINGS "${_xr_main_header}" _xr_directives REGEX "^// xrobot:" ENCODING UTF-8)
   set(_xr_config "")
   set(_xr_depends "")
   foreach(_xr_directive IN LISTS _xr_directives)
-    if(NOT _xr_directive MATCHES "^// xrobot: (config|depends) \"([^\"]+)\"$")
+    if(_xr_directive MATCHES "^// xrobot: digest [0-9a-f]+$")
+      continue()
+    endif()
+    if(NOT _xr_directive MATCHES "^// xrobot: (config|entry|depends) \"([^\"]+)\"$")
       message(
         FATAL_ERROR "[XRobot] ${_xr_main_header}: unrecognized line: ${_xr_directive}"
       )
@@ -333,14 +336,13 @@ if(XROBOT_MODULES_DIR)
   file(RELATIVE_PATH _xr_config_arg "${_xr_bsp_root}" "${_xr_config}")
   message(STATUS "XRobot product: ${_xr_config_arg}")
 
-  # Every build compares file times before compiling xr. It reports, never regenerates.
-  string(REPLACE ";" "|" _xr_inputs "${_xr_config};${_xr_depends}")
+  # Every build compares the content of the header's inputs with the digest it records,
+  # before compiling xr. It reports, never regenerates.
   add_custom_target(
     xrobot_freshness_check ALL
     COMMAND
       ${CMAKE_COMMAND} "-DXROBOT_MAIN_HEADER=${_xr_main_header}"
-      "-DXROBOT_BSP_ROOT=${_xr_bsp_root}" "-DXROBOT_CONFIG=${_xr_config_arg}"
-      "-DXROBOT_INPUTS=${_xr_inputs}" -P
+      "-DXROBOT_BSP_ROOT=${_xr_bsp_root}" -P
       "${CMAKE_CURRENT_LIST_DIR}/cmake/XRobotFreshness.cmake"
     COMMENT "Checking that the generated XRobot entry is up to date"
     VERBATIM

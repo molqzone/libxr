@@ -172,3 +172,15 @@ target_include_directories(
   PRIVATE core/print/print $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
           "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/Eigen"
 )
+
+# XRobot 生成头文件的内容检查（cmake/XRobotFreshness.cmake）；只运行 CMake 脚本，不编译代码。
+# The content check of the XRobot generated header (cmake/XRobotFreshness.cmake); it runs a
+# CMake script and compiles nothing.
+add_test(
+  NAME xrobot_freshness
+  COMMAND
+    "${CMAKE_COMMAND}" "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/xrobot_freshness"
+    "-DCHECK=${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/XRobotFreshness.cmake" -P
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xrobot_freshness.cmake"
+)
+set_tests_properties(xrobot_freshness PROPERTIES TIMEOUT 60)
