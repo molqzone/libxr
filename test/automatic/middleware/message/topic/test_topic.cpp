@@ -330,10 +330,11 @@ void test_message_topic_contract()
   auto topic = LibXR::Topic::CreateTopic<double>("contract_tp", &domain);
   const auto key = static_cast<unsigned>(LibXR::CRC32::Calculate("contract_tp", 11));
 
-  // 报错写出 topic 名称（调用方有名称时）、CRC32 键和两边的字节数与对齐；int64_t 与
-  // double 字节数和对齐相同，报错仍写明类型不同。 The message names the topic (when the
-  // call site has the name), its CRC32 key, and both sizes and alignments; int64_t and
-  // double share them, and the message still says the types differ.
+  // 报错写出 topic 名称（调用方有名称时）、CRC32 键和两边的字节数与对齐；
+  // int64_t 与 double 字节数和对齐相同，报错仍写明类型不同。
+  // The message names the topic (when the call site has the name), its CRC32 key, and
+  // both sizes and alignments; int64_t and double share them, and the message still says
+  // the types differ.
   char named_float[160];
   std::snprintf(
       named_float, sizeof(named_float),
