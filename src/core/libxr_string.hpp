@@ -185,7 +185,7 @@ struct RuntimeStringArgumentTypes
  */
 struct RuntimeStringTextPart
 {
-  std::string_view view;
+  std::string_view view = {};
   ErrorCode status = ErrorCode::OK;
 };
 
