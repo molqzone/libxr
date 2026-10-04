@@ -16,7 +16,7 @@
 
 </div>
 
-[English](https://github.com/xrobot-org/libxr/blob/main/README.md) | [中文](https://github.com/xrobot-org/libxr/blob/main/README.zh-CN.md)
+[English](./README.md) | [中文](./README.zh-CN.md)
 
 ## 本库适用于哪些人
 
@@ -31,7 +31,7 @@
 
 ## USB 协议栈支持
 
-请参阅 [XRUSB](https://github.com/Jiu-xiao/XRUSB)
+见 [XRUSB](./src/driver/usb/README.zh-CN.md)
 
 ## 系统层支持
 
@@ -87,7 +87,7 @@
 
 ## 使用方法示例
 
-```sh
+```cmake
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -99,10 +99,6 @@ add_subdirectory(path_to_libxr)
 target_link_libraries(${CMAKE_PROJECT_NAME}
     xr
 )
-
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
-)
 ```
 
 ## 通用CMake配置
@@ -111,7 +107,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 LibXR 当前以 C++20 为目标标准，请使用已经支持 `CMAKE_CXX_STANDARD 20` 的编译器/工具链。
 
-默认会自动识别宿主系统（Linux、Windows），自动设置 LIBXR_SYSTEM 和 LIBXR_DRIVER。你也可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定，分别对应[system](./system)和[driver](./driver)下的不同文件夹。
+在 Linux 宿主上本地编译时，`LIBXR_SYSTEM` 和 `LIBXR_DRIVER` 默认为 `linux`，设置了 `WEBOTS_HOME` 时为 `webots`。也可以在 CMake 命令行或外部 CMakeLists.txt 中预先指定，分别对应[system](./system)和[driver](./driver)下的不同文件夹。
 
 ```cmake
 # 手动指定系统和驱动
@@ -152,7 +148,7 @@ set(LIBXR_DEFAULT_SCALAR float)
 
 ### 日志消息最大长度
 
-裸机/RTOS默认为64，Linux下默认为256。
+Linux、Webots 和 WebAssembly 下默认为 256，其他系统默认为 64。
 
 ```cmake
 set(XR_LOG_MESSAGE_MAX_LEN 256)
@@ -169,6 +165,10 @@ set(LIBXR_LOG_LEVEL 4)
 ### 日志打印等级
 
 4-0分别对应DEBUG、INFO、PASS、WARNING、ERROR，默认为4。此选项决定了允许打印到STDIO::write_的最大日志级别。
+
+```cmake
+set(LIBXR_LOG_OUTPUT_LEVEL 4)
+```
 
 ### 单元测试
 

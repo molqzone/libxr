@@ -16,7 +16,7 @@ Want to be the best embedded framework
 
 </div>
 
-[English](https://github.com/xrobot-org/libxr/blob/main/README.md) | [中文](https://github.com/xrobot-org/libxr/blob/main/README.zh-CN.md)
+[English](./README.md) | [中文](./README.zh-CN.md)
 
 ## Who is this library for
 
@@ -31,7 +31,7 @@ Want to be the best embedded framework
 
 ## USB Stack Support
 
-See [XRUSB](https://github.com/Jiu-xiao/XRUSB)
+See [XRUSB](./src/driver/usb/README.md)
 
 ## System Layer
 
@@ -87,7 +87,7 @@ Some useful tools for debugging, robotics, and communication.
 
 ## Usage
 
-```sh
+```cmake
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -99,10 +99,6 @@ add_subdirectory(path_to_libxr)
 target_link_libraries(${CMAKE_PROJECT_NAME}
     xr
 )
-
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    PUBLIC $<TARGET_PROPERTY:xr,INTERFACE_INCLUDE_DIRECTORIES>
-)
 ```
 
 ## General CMake Configuration
@@ -111,7 +107,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 LibXR currently targets C++20. Use a compiler/toolchain that already supports `CMAKE_CXX_STANDARD 20`.
 
-By default, the host system (Linux, Windows) is automatically detected, and `LIBXR_SYSTEM` and `LIBXR_DRIVER` are set accordingly. You can also manually specify them via the CMake command line or in an external `CMakeLists.txt`, corresponding to the different folders under [system](./system) and [driver](./driver).
+When not cross compiling on a Linux host, `LIBXR_SYSTEM` and `LIBXR_DRIVER` default to `linux`, or to `webots` when `WEBOTS_HOME` is set. You can also manually specify them via the CMake command line or in an external `CMakeLists.txt`, corresponding to the different folders under [system](./system) and [driver](./driver).
 
 ```cmake
 # Manually specify system and driver
@@ -152,7 +148,7 @@ set(LIBXR_DEFAULT_SCALAR float)
 
 ### Maximum Log Message Length
 
-Defaults to 64 for bare-metal/RTOS, and 256 for Linux.
+Defaults to 256 on Linux, Webots and WebAssembly, and 64 on the other systems.
 
 ```cmake
 set(XR_LOG_MESSAGE_MAX_LEN 256)
@@ -169,6 +165,10 @@ set(LIBXR_LOG_LEVEL 4)
 ### Log Print Level
 
 Levels 4-0 correspond to DEBUG, INFO, PASS, WARNING, and ERROR, with the default set to 4. This option determines the maximum log level allowed to be printed to `STDIO::write_`.
+
+```cmake
+set(LIBXR_LOG_OUTPUT_LEVEL 4)
+```
 
 ### Unit Testing
 
