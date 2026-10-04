@@ -21,12 +21,12 @@ class Thread
    */
   enum class Priority : uint8_t
   {
-    IDLE = 0,                            ///< 空闲优先级 Idle priority
-    LOW = LIBXR_PRIORITY_STEP * 1,       ///< 低优先级 Low priority
-    MEDIUM = LIBXR_PRIORITY_STEP * 2,    ///< 中等优先级 Medium priority
-    HIGH = LIBXR_PRIORITY_STEP * 3,      ///< 高优先级 High priority
-    REALTIME = LIBXR_PRIORITY_STEP * 4,  ///< 实时优先级 Realtime priority
-    NUMBER = 5                           ///< 优先级数量 Number of priority levels
+    IDLE = 0,                            ///< 空闲优先级 / Idle priority
+    LOW = LIBXR_PRIORITY_STEP * 1,       ///< 低优先级 / Low priority
+    MEDIUM = LIBXR_PRIORITY_STEP * 2,    ///< 中等优先级 / Medium priority
+    HIGH = LIBXR_PRIORITY_STEP * 3,      ///< 高优先级 / High priority
+    REALTIME = LIBXR_PRIORITY_STEP * 4,  ///< 实时优先级 / Realtime priority
+    NUMBER = 5                           ///< 优先级数量 / Number of priority levels
   };
 
   /**
@@ -38,19 +38,19 @@ class Thread
   /**
    * @brief  通过 FreeRTOS 线程句柄创建线程对象
    *         Constructor to create a thread object from a FreeRTOS thread handle
-   * @param  handle FreeRTOS 线程句柄 FreeRTOS thread handle
+   * @param  handle FreeRTOS 线程句柄 / FreeRTOS thread handle
    */
   Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
 
   /**
    * @brief  创建新线程
    *         Creates a new thread
-   * @tparam ArgType 线程函数的参数类型 The type of argument for the thread function
-   * @param  arg 线程函数的参数 Argument for the thread function
-   * @param  function 线程执行的函数 Function executed by the thread
-   * @param  name 线程名称 Thread name
-   * @param  stack_depth 线程栈大小（字节） Stack size of the thread (bytes)
-   * @param  priority 线程优先级 Thread priority
+   * @tparam ArgType 线程函数的参数类型 / The type of argument for the thread function
+   * @param  arg 线程函数的参数 / Argument for the thread function
+   * @param  function 线程执行的函数 / Function executed by the thread
+   * @param  name 线程名称 / Thread name
+   * @param  stack_depth 线程栈大小（字节） / Stack size of the thread (bytes)
+   * @param  priority 线程优先级 / Thread priority
    *
    * @details
    * 该方法基于 FreeRTOS `xTaskCreate()` 创建新线程，执行 `function` 并传递 `arg`
@@ -106,21 +106,21 @@ class Thread
   /**
    * @brief  获取当前线程对象
    *         Gets the current thread object
-   * @return 当前线程对象 The current thread object
+   * @return 当前线程对象 / The current thread object
    */
   static Thread Current(void);
 
   /**
    * @brief  获取当前系统时间（毫秒）
    *         Gets the current system time in milliseconds
-   * @return 当前时间（毫秒） Current time in milliseconds
+   * @return 当前时间（毫秒） / Current time in milliseconds
    */
   static uint32_t GetTime() { return static_cast<uint32_t>(Timebase::GetMilliseconds()); }
 
   /**
    * @brief  让线程进入休眠状态
    *         Puts the thread to sleep
-   * @param  milliseconds 休眠时间（毫秒） Sleep duration in milliseconds
+   * @param  milliseconds 休眠时间（毫秒） / Sleep duration in milliseconds
    */
   static void Sleep(uint32_t milliseconds)
   {
@@ -130,16 +130,16 @@ class Thread
   /**
    * @brief  让线程休眠直到指定时间点
    *         Puts the thread to sleep until a specified time
-   * @param  last_waskup_time 上次唤醒时间 Last wake-up time
-   * @param  time_to_sleep 休眠时长（毫秒） Sleep duration in milliseconds
+   * @param  last_wakeup_time 上次唤醒时间 / Last wake-up time
+   * @param  time_to_sleep 休眠时长（毫秒） / Sleep duration in milliseconds
    */
-  static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep)
+  static void SleepUntil(MillisecondTimestamp& last_wakeup_time, uint32_t time_to_sleep)
   {
     ASSERT(time_to_sleep > 0U);
 
     uint32_t current_tick = static_cast<uint32_t>(xTaskGetTickCount());
     uint32_t previous_wake_time =
-        static_cast<uint32_t>(last_waskup_time) + libxr_freertos_timebase_tick_offset;
+        static_cast<uint32_t>(last_wakeup_time) + libxr_freertos_timebase_tick_offset;
 
     if ((previous_wake_time - current_tick) < (UINT32_MAX / 2U))
     {
@@ -148,7 +148,7 @@ class Thread
 
     TickType_t wake_time = static_cast<TickType_t>(previous_wake_time);
     vTaskDelayUntil(&wake_time, static_cast<TickType_t>(time_to_sleep));
-    last_waskup_time = MillisecondTimestamp(static_cast<uint32_t>(wake_time) -
+    last_wakeup_time = MillisecondTimestamp(static_cast<uint32_t>(wake_time) -
                                             libxr_freertos_timebase_tick_offset);
   }
 
@@ -161,11 +161,11 @@ class Thread
   /**
    * @brief  线程对象转换为 FreeRTOS 线程句柄
    *         Converts the thread object to a FreeRTOS thread handle
-   * @return FreeRTOS 线程句柄 FreeRTOS thread handle
+   * @return FreeRTOS 线程句柄 / FreeRTOS thread handle
    */
   operator libxr_thread_handle() { return thread_handle_; }
 
  private:
-  libxr_thread_handle thread_handle_;  ///< FreeRTOS 线程句柄 FreeRTOS thread handle
+  libxr_thread_handle thread_handle_;  ///< FreeRTOS 线程句柄 / FreeRTOS thread handle
 };
 }  // namespace LibXR
