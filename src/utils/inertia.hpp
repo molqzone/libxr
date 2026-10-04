@@ -35,7 +35,7 @@ class Inertia
    * @tparam T 数据类型，支持 Scalar、float 或 double。
    * Data type, supporting Scalar, float, or double.
    * @param m 质量值 / Mass value.
-   * @param data 3x3 惯性张量数组。3x3 inertia tensor array.
+   * @param values 3x3 惯性张量数组 / 3x3 inertia tensor array.
    */
   template <typename T, std::enable_if_t<std::is_same<T, Scalar>::value ||
                                              std::is_same<T, float>::value ||
@@ -58,7 +58,7 @@ class Inertia
    * @tparam T 数据类型，支持 Scalar、float 或 double。
    * Data type, supporting Scalar, float, or double.
    * @param m 质量值 / Mass value.
-   * @param data 3x3 惯性张量矩阵。3x3 inertia tensor matrix.
+   * @param matrix 3x3 惯性张量矩阵 / 3x3 inertia tensor matrix.
    */
   template <typename T, std::enable_if_t<std::is_same<T, Scalar>::value ||
                                              std::is_same<T, float>::value ||
@@ -86,7 +86,7 @@ class Inertia
    * Constructs an inertia object using mass and a 6-element symmetric inertia matrix.
    * @tparam T 数据类型，支持 float 或 double / Data type, supporting float or double.
    * @param m 质量值 / Mass value.
-   * @param data 6 维惯性张量数据。6-element inertia tensor data.
+   * @param arr 6 维惯性张量数据 / 6-element inertia tensor data.
    */
   template <typename T,
             std::enable_if_t<
@@ -114,7 +114,7 @@ class Inertia
    * @brief 使用 Eigen 3x3 矩阵构造惯性对象。
    * Constructs an inertia object using an Eigen 3x3 matrix.
    * @param m 质量值 / Mass value.
-   * @param R 3x3 惯性张量矩阵。3x3 inertia tensor matrix.
+   * @param R 3x3 惯性张量矩阵 / 3x3 inertia tensor matrix.
    */
   Inertia(Scalar m, const Eigen::Matrix<Scalar, 3, 3>& R) : mass(m)
   {
@@ -187,7 +187,7 @@ class Inertia
 
   /**
    * @brief 使用四元数旋转惯性张量 / Rotates the inertia tensor using a quaternion.
-   * @param q 四元数。Quaternion.
+   * @param q 四元数 / Quaternion.
    * @return 旋转后的惯性张量 / Rotated inertia tensor.
    */
   Inertia Rotate(const Eigen::Quaternion<Scalar>& q) const
@@ -198,8 +198,8 @@ class Inertia
 
   /**
    * @brief 使用四元数旋转 3x3 矩阵 / Rotates a 3x3 matrix using a quaternion.
-   * @param R 3x3 矩阵。3x3 matrix.
-   * @param q 四元数。Quaternion.
+   * @param R 3x3 矩阵 / 3x3 matrix.
+   * @param q 四元数 / Quaternion.
    * @return 旋转后的矩阵 / Rotated matrix.
    */
   static Eigen::Matrix<Scalar, 3, 3> Rotate(const Eigen::Matrix<Scalar, 3, 3>& R,
@@ -248,7 +248,7 @@ class CenterOfMass
    * @brief 使用质量和 Eigen 3D 向量构造质心对象。
    * Constructs a center of mass object using mass and Eigen 3D vector.
    * @param m 质量值 / Mass value.
-   * @param p 3D 位置向量。3D position vector.
+   * @param p 3D 位置向量 / 3D position vector.
    */
   CenterOfMass(Scalar m, const Eigen::Matrix<Scalar, 3, 1>& p) : position(p), mass(m) {}
 

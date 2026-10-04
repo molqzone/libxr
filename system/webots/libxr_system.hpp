@@ -49,8 +49,8 @@ typedef pthread_t libxr_thread_handle;
  */
 typedef struct
 {
-  pthread_mutex_t mutex;  ///< 互斥锁 Mutex
-  pthread_cond_t cond;    ///< 条件变量 Condition variable
+  pthread_mutex_t mutex;  ///< 互斥锁 / Mutex
+  pthread_cond_t cond;    ///< 条件变量 / Condition variable
 } condition_var_handle;
 #endif
 

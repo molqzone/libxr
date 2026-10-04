@@ -23,11 +23,11 @@ class Thread
    */
   enum class Priority : uint8_t
   {
-    IDLE,      ///< 空闲优先级 Idle priority
-    LOW,       ///< 低优先级 Low priority
-    MEDIUM,    ///< 中等优先级 Medium priority
-    HIGH,      ///< 高优先级 High priority
-    REALTIME,  ///< 实时优先级 Realtime priority
+    IDLE,      ///< 空闲优先级 / Idle priority
+    LOW,       ///< 低优先级 / Low priority
+    MEDIUM,    ///< 中等优先级 / Medium priority
+    HIGH,      ///< 高优先级 / High priority
+    REALTIME,  ///< 实时优先级 / Realtime priority
     NUMBER,    ///< 优先级数量 / Number of priority levels
   };
 
@@ -40,7 +40,7 @@ class Thread
   /**
    * @brief  通过 POSIX 线程句柄创建线程对象
    *         Constructor to create a thread object from a POSIX thread handle
-   * @param  handle POSIX 线程句柄 POSIX thread handle
+   * @param  handle POSIX 线程句柄 / POSIX thread handle
    */
   Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
 
@@ -50,19 +50,23 @@ class Thread
    * @tparam ArgType 线程函数的参数类型 / The type of argument for the thread function
    * @param  arg 线程函数的参数 / Argument for the thread function
    * @param  function 线程执行的函数 / Function executed by the thread
-   * @param  name 线程名称 Thread name
+   * @param  name 线程名称 / Thread name
    * @param  stack_depth 线程栈大小（字节） / Stack size of the thread (bytes)
-   * @param  priority 线程优先级 Thread priority
+   * @param  priority 线程优先级 / Thread priority
    *
    * @details
    * 该方法基于 POSIX `pthread_create()` 创建新线程，执行 `function` 并传递 `arg`
-   * 作为参数。 线程栈大小 `stack_depth` 需要进行调整以符合 POSIX 线程的栈管理方式。
-   * 如果系统支持 `SCHED_RR` 调度策略，则设置线程优先级。
+   * 作为参数。栈大小取 `stack_depth` 与 `PTHREAD_STACK_MIN` 中的较大值。`SCHED_FIFO`
+   * 的优先级范围足够时，线程使用 `SCHED_FIFO` 策略，优先级为最低优先级加 `priority`；
+   * 范围不足或设置优先级失败时使用默认调度策略。
+   * 按这些属性创建失败时，改用默认属性重试一次。
    *
    * This method creates a new thread using POSIX `pthread_create()`, executing `function`
-   * with `arg` as the argument. The `stack_depth` needs adjustment for POSIX thread stack
-   * management. If the system supports `SCHED_RR` scheduling, thread priority is set
-   * accordingly.
+   * with `arg` as the argument. The stack size is the larger of `stack_depth` and
+   * `PTHREAD_STACK_MIN`. When the `SCHED_FIFO` priority range is large enough, the thread
+   * uses `SCHED_FIFO` with the minimum priority plus `priority`; otherwise, or when
+   * setting the priority fails, it uses the default policy. If creation with these
+   * attributes fails, it is retried once with default attributes.
    */
   template <typename ArgType>
   void Create(ArgType arg, void (*function)(ArgType arg), const char* name,
@@ -72,20 +76,11 @@ class Thread
     pthread_attr_init(&attr);
     ConfigureAttributes(attr, stack_depth, priority);
 
-    /**
-     * @brief  线程数据封装类
-     *         Thread data encapsulation class
-     */
+    // 线程数据封装类 / Thread data encapsulation class
     class ThreadBlock
     {
      public:
-      /**
-       * @brief  构造函数，存储线程相关数据
-       *         Constructor to store thread-related data
-       * @param  fun 线程执行的函数 / Function executed by the thread
-       * @param  arg 线程参数 Thread argument
-       * @param  name 线程名称 Thread name
-       */
+      // 存储线程函数、参数和名称 / Store the thread function, argument and name
       ThreadBlock(decltype(function) fun, ArgType arg, const char* name)
           : fun_(fun), arg_(arg)
       {
@@ -96,13 +91,8 @@ class Thread
         }
       }
 
-      /**
-       * @brief  线程入口函数，执行用户定义的线程函数
-       *         Thread entry function that executes the user-defined function
-       * @param  arg 线程参数 Thread argument
-       * @return 返回值始终为 `nullptr`
-       *         The return value is always `nullptr`
-       */
+      // 线程入口：执行用户函数后释放 ThreadBlock，返回 nullptr / Thread entry: runs the
+      // user function, frees the ThreadBlock and returns nullptr
       static void* Port(void* arg)
       {
         ThreadBlock* block = static_cast<ThreadBlock*>(arg);
@@ -117,10 +107,9 @@ class Thread
         return static_cast<void*>(nullptr);
       }
 
-      decltype(function) fun_;  ///< 线程执行的函数 / Function executed by the thread
-      ArgType arg_;             ///< 线程函数的参数 / Argument passed to the thread
-                                ///< function
-      char name_[16];           ///< 线程名称 Thread name
+      decltype(function) fun_;  // 线程执行的函数 / Function executed by the thread
+      ArgType arg_;             // 线程函数的参数 / Argument passed to the thread function
+      char name_[16];           // 线程名称 / Thread name
     };
 
     auto block = new ThreadBlock(function, arg, name);
@@ -170,10 +159,10 @@ class Thread
   /**
    * @brief  让线程休眠直到指定时间点
    *         Puts the thread to sleep until a specified time
-   * @param  last_waskup_time 上次唤醒时间 / Last wake-up time
+   * @param  last_wakeup_time 上次唤醒时间 / Last wake-up time
    * @param  time_to_sleep 休眠时长（毫秒） / Sleep duration in milliseconds
    */
-  static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep);
+  static void SleepUntil(MillisecondTimestamp& last_wakeup_time, uint32_t time_to_sleep);
 
   /**
    * @brief  让出 CPU 以执行其他线程
@@ -190,7 +179,7 @@ class Thread
   /**
    * @brief  线程对象转换为 POSIX 线程句柄
    *         Converts the thread object to a POSIX thread handle
-   * @return POSIX 线程句柄 POSIX thread handle
+   * @return POSIX 线程句柄 / POSIX thread handle
    */
   operator libxr_thread_handle() { return thread_handle_; }
 
@@ -233,7 +222,7 @@ class Thread
     pthread_attr_setinheritsched(&attr, PTHREAD_INHERIT_SCHED);
   }
 
-  libxr_thread_handle thread_handle_;  ///< POSIX 线程句柄 POSIX thread handle
+  libxr_thread_handle thread_handle_;  ///< POSIX 线程句柄 / POSIX thread handle
 };
 
 }  // namespace LibXR

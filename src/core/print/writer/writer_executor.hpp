@@ -33,8 +33,7 @@ class Writer::Executor
   [[nodiscard]] ErrorCode Run();
 
  private:
-  // Raw sink and generic field-writing helpers.
-  // 原始输出与通用字段写出辅助函数。
+  // 原始输出与通用字段写出辅助函数 / Raw sink and generic field-writing helpers.
   [[nodiscard]] ErrorCode WriteRaw(std::string_view text);
   [[nodiscard]] ErrorCode WritePadding(char fill, size_t count);
   [[nodiscard]] ErrorCode WriteTextField(std::string_view text, const Spec& spec);
@@ -121,11 +120,11 @@ class Writer::Executor
    */
   [[nodiscard]] ErrorCode WriteCharacterRaw(char ch);
 
+  // 这些小桥接函数只负责让 GenericField 分发更易读，同时保持原有的
+  // “读 spec -> 读下一个已打包参数 -> 调具体 writer” 执行顺序不变。
   // Small bridges that keep GenericField dispatch readable while preserving the
   // existing "read spec -> read next packed argument -> call concrete writer"
   // execution order.
-  // 这些小桥接函数只负责让 GenericField 分发更易读，同时保持原有的
-  // “读 spec -> 读下一个已打包参数 -> 调具体 writer” 执行顺序不变。
   template <std::signed_integral Int>
   [[nodiscard]] ErrorCode DispatchSignedField();
 

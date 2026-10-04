@@ -54,8 +54,8 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
   Position(Scalar x, Scalar y, Scalar z) : Eigen::Matrix<Scalar, 3, 1>(x, y, z) {}
 
   /**
-   * @brief 复制构造函数 / Copy constructor
-   * @param p 另一个 Position 实例 / Another Position instance
+   * @brief 从 Eigen 3x1 向量构造 / Constructs from an Eigen 3x1 vector
+   * @param p Eigen 3x1 向量 / Eigen 3x1 vector
    */
   Position(const Eigen::Matrix<Scalar, 3, 1>& p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
 
@@ -66,10 +66,10 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
   Position(const Position& p) : Eigen::Matrix<Scalar, 3, 1>(p) {}
 
   /**
-   * @brief 乘以旋转矩阵 / Multiply by a rotation matrix
-   * @tparam Rotation 旋转矩阵类型 / Rotation matrix type
-   * @param R 旋转矩阵 / Rotation matrix
-   * @return 旋转后的 Position / Rotated Position
+   * @brief 从 3 元素数组构造 / Constructs from a 3-element array
+   * @tparam T 元素类型，可为 Scalar、float 或 double / Element type: Scalar, float or
+   * double
+   * @param data 存储 (x, y, z) 的数组 / Array storing (x, y, z)
    */
   template <typename T, std::enable_if_t<std::is_same<T, Scalar>::value ||
                                              std::is_same<T, float>::value ||
@@ -94,9 +94,8 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
   }
 
   /**
-   * @brief 赋值运算符，将 Eigen 向量赋值给 Position / Assignment operator to assign an
-   * Eigen vector to Position
-   * @param p Eigen 3x1 向量 / Eigen 3x1 vector
+   * @brief 拷贝赋值运算符 / Copy assignment operator
+   * @param p 另一个 Position / Another Position object
    * @return 赋值后的 Position / Updated Position object
    */
   Position& operator=(const Position& p)
@@ -112,10 +111,13 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
   }
 
   /**
-   * @brief 赋值运算符，将另一个 Position 赋值给当前对象 / Assignment operator to assign
-   * another Position to this object
-   * @param p 另一个 Position / Another Position object
-   * @return 赋值后的 Position / Updated Position object
+   * @brief 返回旋转作用于当前向量的结果 R * p，不修改当前对象 / Returns the rotated
+   * vector R * p without modifying this object
+   * @tparam Rotation 旋转类型：RotationMatrix、Eigen 3x3 矩阵、Quaternion 或 Eigen
+   * 四元数 / Rotation type: RotationMatrix, Eigen 3x3 matrix, Quaternion or Eigen
+   * quaternion
+   * @param R 旋转 / Rotation
+   * @return 旋转后的向量 / Rotated vector
    */
   template <
       typename Rotation,
@@ -502,6 +504,8 @@ class EulerAngle
         .finished();
   }
 
+  /// @brief 转换为四元数，默认使用 ZYX 顺序。
+  /// Converts to a quaternion using the ZYX order by default.
   Eigen::Quaternion<Scalar> ToQuaternion() const { return ToQuaternionZYX(); }
 
 #if 0
@@ -548,8 +552,8 @@ class EulerAngle
   }
 #endif
 
-  /// @brief 转换为四元数，默认使用 ZYX 顺序。
-  /// Converts to a quaternion using the ZYX order by default.
+  /// @brief 按 XYZ 顺序转换为四元数。
+  /// Converts to a quaternion using the XYZ order.
   Eigen::Quaternion<Scalar> ToQuaternionXYZ() const
   {
     return Eigen::Quaternion<Scalar>(ToRotationMatrixXYZ());
@@ -612,7 +616,15 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
    * @brief 通过 9 个矩阵元素的值构造旋转矩阵。
    *        Constructs a rotation matrix using 9 matrix elements.
    *
-   * @param r00-r22 矩阵各元素值 / Elements of the matrix.
+   * @param r00 第 0 行第 0 列元素 / Element at row 0, column 0
+   * @param r01 第 0 行第 1 列元素 / Element at row 0, column 1
+   * @param r02 第 0 行第 2 列元素 / Element at row 0, column 2
+   * @param r10 第 1 行第 0 列元素 / Element at row 1, column 0
+   * @param r11 第 1 行第 1 列元素 / Element at row 1, column 1
+   * @param r12 第 1 行第 2 列元素 / Element at row 1, column 2
+   * @param r20 第 2 行第 0 列元素 / Element at row 2, column 0
+   * @param r21 第 2 行第 1 列元素 / Element at row 2, column 1
+   * @param r22 第 2 行第 2 列元素 / Element at row 2, column 2
    */
   RotationMatrix(Scalar r00, Scalar r01, Scalar r02, Scalar r10, Scalar r11, Scalar r12,
                  Scalar r20, Scalar r21, Scalar r22)

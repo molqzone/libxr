@@ -10,11 +10,11 @@
 
 /**
  * @brief 为新增键预留空间并写入元数据头
- *        (Reserve space for one new key and write its metadata header).
- * @param name_len 键名长度 (Key name length).
- * @param size 数据字节数 (Payload size in bytes).
- * @param key_buf_offset 返回新键头偏移 (Receives the new key-header offset).
- * @return 操作结果 (Operation result).
+ *        Reserve space for one new key and write its metadata header.
+ * @param name_len 键名长度 / Key name length.
+ * @param size 数据字节数 / Payload size in bytes.
+ * @param key_buf_offset 返回新键头偏移 / Receives the new key-header offset.
+ * @return 操作结果 / Operation result.
  * @note 这个阶段只负责把新键头放到主块尾部，并在必要时把上一键改成“后面还有下一键”；
  *       名字区和数据区由调用方随后写入。
  *       This stage only places the new key header at the tail of the main
@@ -97,12 +97,12 @@ add_again:
 
 /**
  * @brief 使用现有名字数据新增一个键
- *        (Add one key using an existing name already stored in flash).
- * @param name_offset 已存键名在 Flash 中的偏移 (Flash offset of the already stored name).
- * @param name_len 键名长度 (Key name length).
- * @param data 键数据地址 (Address of the key payload).
- * @param size 键数据字节数 (Payload size in bytes).
- * @return 操作结果 (Operation result).
+ *        Add one key using an existing name already stored in flash.
+ * @param name_offset 已存键名在 Flash 中的偏移 / Flash offset of the already stored name.
+ * @param name_len 键名长度 / Key name length.
+ * @param data 键数据地址 / Address of the key payload.
+ * @param size 键数据字节数 / Payload size in bytes.
+ * @return 操作结果 / Operation result.
  * @note 这个重载给“逻辑更新旧键、但复用旧名字字节”那条路径使用。
  *       This overload is used by the logical-update path that reuses the
  *       existing key-name bytes already stored in Flash.
@@ -122,11 +122,11 @@ ErrorCode AddKey(size_t name_offset, size_t name_len, const void* data, size_t s
 }
 
 /**
- * @brief 按名称新增一个键 (Add one key by name).
- * @param name 键名 (Key name).
- * @param data 键数据地址 (Address of the key payload).
- * @param size 键数据字节数 (Payload size in bytes).
- * @return 操作结果 (Operation result).
+ * @brief 按名称新增一个键 / Add one key by name.
+ * @param name 键名 / Key name.
+ * @param data 键数据地址 / Address of the key payload.
+ * @param size 键数据字节数 / Payload size in bytes.
+ * @return 操作结果 / Operation result.
  */
 ErrorCode AddKey(const char* name, const void* data, size_t size)
 {
@@ -150,13 +150,13 @@ ErrorCode AddKey(const char* name, const void* data, size_t size)
 
 /**
  * @brief 按名称更新一个键，并在需要时触发回收
- *        (Update one key by name and recycle storage when needed).
- * @param name 键名 (Key name).
- * @param data 新数据地址 (Address of the new payload).
- * @param size 新数据字节数 (Payload size in bytes).
+ *        Update one key by name and recycle storage when needed.
+ * @param name 键名 / Key name.
+ * @param data 新数据地址 / Address of the new payload.
+ * @param size 新数据字节数 / Payload size in bytes.
  * @param recycle 是否允许本次调用触发回收
- *                (Whether this call may trigger recycle).
- * @return 操作结果 (Operation result).
+ *                Whether this call may trigger recycle.
+ * @return 操作结果 / Operation result.
  * @note 当前实现只支持“同名且同尺寸”的逻辑更新；尺寸不一致时直接返回
  *       `ErrorCode::FAILED`，不会自动改写布局。
  *       The current implementation supports only logical replacement of the
@@ -207,9 +207,9 @@ ErrorCode SetKey(const char* name, const void* data, size_t size, bool recycle =
 
 /**
  * @brief 计算某个键的数据区起始偏移
- *        (Compute the starting offset of one key payload).
- * @param offset 键头偏移 (Key-header offset).
- * @return 数据区起始偏移 (Starting offset of the payload).
+ *        Compute the starting offset of one key payload.
+ * @param offset 键头偏移 / Key-header offset.
+ * @return 数据区起始偏移 / Starting offset of the payload.
  */
 size_t GetKeyData(size_t offset)
 {
@@ -220,16 +220,16 @@ size_t GetKeyData(size_t offset)
 
 /**
  * @brief 计算某个键名字区起始偏移
- *        (Compute the starting offset of one key name).
- * @param offset 键头偏移 (Key-header offset).
- * @return 名字区起始偏移 (Starting offset of the key name).
+ *        Compute the starting offset of one key name.
+ * @param offset 键头偏移 / Key-header offset.
+ * @return 名字区起始偏移 / Starting offset of the key name.
  */
 size_t GetKeyName(size_t offset) { return offset + AlignSize(sizeof(KeyInfo)); }
 
 /**
- * @brief 计算一个键总共占用的字节数 (Compute the total byte span of one key).
- * @param offset 键头偏移 (Key-header offset).
- * @return 该键占用的总字节数 (Total byte size occupied by the key).
+ * @brief 计算一个键总共占用的字节数 / Compute the total byte span of one key.
+ * @param offset 键头偏移 / Key-header offset.
+ * @return 该键占用的总字节数 / Total byte size occupied by the key.
  */
 size_t GetKeySize(size_t offset)
 {
@@ -240,9 +240,9 @@ size_t GetKeySize(size_t offset)
 }
 
 /**
- * @brief 计算下一键的起始偏移 (Compute the starting offset of the next key).
- * @param offset 当前键头偏移 (Current key-header offset).
- * @return 下一键的起始偏移 (Starting offset of the next key).
+ * @brief 计算下一键的起始偏移 / Compute the starting offset of the next key.
+ * @param offset 当前键头偏移 / Current key-header offset.
+ * @return 下一键的起始偏移 / Starting offset of the next key.
  */
 size_t GetNextKey(size_t offset)
 {
@@ -252,10 +252,10 @@ size_t GetNextKey(size_t offset)
 }
 
 /**
- * @brief 计算当前块里最后一个键的偏移 (Locate the last key in the current block).
- * @param block 目标块类型 (Target block type).
+ * @brief 计算当前块里最后一个键的偏移 / Locate the last key in the current block.
+ * @param block 目标块类型 / Target block type.
  * @return 最后一个键的偏移；若块为空则返回 `0`
- *         (Offset of the last key, or `0` when the block is empty).
+ *         Offset of the last key, or `0` when the block is empty.
  */
 size_t GetLastKey(BlockType block)
 {
@@ -277,12 +277,12 @@ size_t GetLastKey(BlockType block)
 
 /**
  * @brief 比较存储中的键数据和给定数据是否不同
- *        (Compare whether the stored payload differs from the given payload).
- * @param offset 键头偏移 (Key-header offset).
- * @param data 待比较数据地址 (Address of the candidate payload).
- * @param size 待比较数据字节数 (Payload size in bytes).
+ *        Compare whether the stored payload differs from the given payload.
+ * @param offset 键头偏移 / Key-header offset.
+ * @param data 待比较数据地址 / Address of the candidate payload.
+ * @param size 待比较数据字节数 / Payload size in bytes.
  * @return 若内容不同则返回 `true`
- *         (Returns `true` when the payloads differ).
+ *         Returns `true` when the payloads differ.
  */
 bool KeyDataCompare(size_t offset, const void* data, size_t size)
 {
@@ -303,11 +303,11 @@ bool KeyDataCompare(size_t offset, const void* data, size_t size)
 
 /**
  * @brief 比较存储中的键名和给定名称是否不同
- *        (Compare whether the stored key name differs from the given name).
- * @param offset 键头偏移 (Key-header offset).
- * @param name 待比较键名 (Key name to compare against).
+ *        Compare whether the stored key name differs from the given name.
+ * @param offset 键头偏移 / Key-header offset.
+ * @param name 待比较键名 / Key name to compare against.
  * @return 若名称不同则返回 `true`
- *         (Returns `true` when the names differ).
+ *         Returns `true` when the names differ.
  */
 bool KeyNameCompare(size_t offset, const char* name)
 {
@@ -327,11 +327,11 @@ bool KeyNameCompare(size_t offset, const char* name)
 
 /**
  * @brief 在主块里按名称查找键，并在删除项过多时触发回收
- *        (Search one key by name in the main block and trigger recycle when
- *        too many tombstones are observed).
- * @param name 待查找键名 (Key name to search for).
+ *        Search one key by name in the main block and trigger recycle when
+ *        too many tombstones are observed.
+ * @param name 待查找键名 / Key name to search for.
  * @return 找到时返回键头偏移，找不到返回 `0`
- *         (Returns the key-header offset when found, otherwise `0`).
+ *         Returns the key-header offset when found, otherwise `0`.
  * @note 这里会顺手统计沿途遇到的失效键数量；超过阈值时，查找结束后会先做一次回收，
  *       再重新查一遍。
  *       This also counts invalidated keys seen along the scan; when that

@@ -7,8 +7,8 @@ namespace LibXR
 
 /**
  * @class PWM
- * @brief Abstract base class for PWM (Pulse Width Modulation) control.
- * PWM（脉冲宽度调制）控制的抽象基类。
+ * @brief PWM（脉冲宽度调制）控制的抽象基类。
+ * Abstract base class for PWM (Pulse Width Modulation) control.
  */
 class PWM
 {
@@ -26,8 +26,8 @@ class PWM
 
   /**
    * @brief 设置 PWM 信号的占空比 / Sets the duty cycle of the PWM signal.
-   * @param value The duty cycle as a floating-point value (0.0 to 1.0).
-   * 占空比，浮点值（0.0 到 1.0）。
+   * @param value 占空比，浮点值（0.0 到 1.0）。
+   * The duty cycle as a floating-point value (0.0 to 1.0).
    * @return 返回操作结果的错误码 / ErrorCode indicating success or failure.
    */
   virtual ErrorCode SetDutyCycle(float value) = 0;

@@ -10,8 +10,8 @@ namespace LibXR::Debug::JtagProtocol
  */
 enum class Port : uint8_t
 {
-  DP = 0,  ///< Debug Port / 调试端口
-  AP = 1,  ///< Access Port / 访问端口
+  DP = 0,  ///< 调试端口 / Debug Port
+  AP = 1,  ///< 访问端口 / Access Port
 };
 
 /**
@@ -23,9 +23,9 @@ enum class Port : uint8_t
 enum class Ack : uint8_t
 {
   NO_ACK = 0x0,    ///< 无应答 / No ACK
-  OK = 0x1,        ///< OK / OK
-  WAIT = 0x2,      ///< WAIT / WAIT
-  FAULT = 0x4,     ///< FAULT / FAULT
+  OK = 0x1,        ///< OK
+  WAIT = 0x2,      ///< WAIT
+  FAULT = 0x4,     ///< FAULT
   PROTOCOL = 0x7,  ///< 协议错误（非法 ACK）/ Protocol error (invalid ACK)
 };
 
@@ -48,7 +48,7 @@ struct Request
  */
 struct Response
 {
-  Ack ack = Ack::PROTOCOL;  ///< ACK / ACK
+  Ack ack = Ack::PROTOCOL;  ///< ACK
   uint32_t rdata = 0;  ///< 读数据（仅读响应有效）/ Read data (valid for read responses)
 };
 

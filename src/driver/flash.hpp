@@ -25,20 +25,20 @@ struct FlashRegion
 
 /**
  * @class Flash
- * @brief Abstract base class representing a flash memory interface.
- * 抽象基类，表示闪存接口。
+ * @brief 抽象基类，表示闪存接口。
+ * Abstract base class representing a flash memory interface.
  */
 class Flash
 {
  public:
   /**
-   * @brief Constructs a Flash object with specified properties.
-   * 构造函数，初始化闪存属性。
-   * @param min_erase_size Minimum erasable block size in bytes.
-   * 最小可擦除块大小（字节）。
+   * @brief 构造函数，初始化闪存属性。
+   * Constructs a Flash object with specified properties.
+   * @param min_erase_size 最小可擦除块大小（字节）。
+   * Minimum erasable block size in bytes.
    * @param min_write_size 最小可写块大小（字节） / Minimum writable block size in bytes.
-   * @param flash_area Memory area allocated for flash operations.
-   * 用于闪存操作的存储区域。
+   * @param flash_area 用于闪存操作的存储区域。
+   * Memory area allocated for flash operations.
    */
   Flash(size_t min_erase_size, size_t min_write_size, RawData flash_area);
 
@@ -68,29 +68,24 @@ class Flash
   virtual ErrorCode Read(size_t offset, RawData data);
 
   /**
-   * @brief Returns the minimum erasable block size in bytes.
-   * 获取最小可擦除块大小（字节）。
+   * @brief 获取最小可擦除块大小（字节）。
+   * Returns the minimum erasable block size in bytes.
    *
-   * @return size_t Minimum erasable block size in bytes.
-   * 最小可擦除块大小（字节）。
+   * @return 最小可擦除块大小（字节） / size_t Minimum erasable block size in bytes.
    */
   size_t MinEraseSize() const { return min_erase_size_; }
 
   /**
-   * @brief Returns the minimum writable block size in bytes.
-   * 获取最小可写块大小（字节）。
+   * @brief 获取最小可写块大小（字节） / Returns the minimum writable block size in bytes.
    *
-   * @return size_t Minimum writable block size in bytes.
-   * 最小可写块大小（字节）。
+   * @return 最小可写块大小（字节） / size_t Minimum writable block size in bytes.
    */
   size_t MinWriteSize() const { return min_write_size_; }
 
   /**
-   * @brief Returns the size of the flash memory area.
-   * 获取闪存存储区域的大小。
+   * @brief 获取闪存存储区域的大小 / Returns the size of the flash memory area.
    *
-   * @return size_t Size of the flash memory area.
-   * 闪存存储区域的大小。
+   * @return 闪存存储区域的大小 / size_t Size of the flash memory area.
    */
   size_t Size() const { return flash_area_.size_; }
 
@@ -99,8 +94,8 @@ class Flash
       0;  ///< 最小可擦除块大小（字节） / Minimum erasable block size in bytes.
   size_t min_write_size_ =
       0;  ///< 最小可写块大小（字节） / Minimum writable block size in bytes.
-  RawData flash_area_;  ///< Memory area allocated for flash operations.
-                        ///< 用于闪存操作的存储区域。
+  RawData flash_area_;  ///< 用于闪存操作的存储区域。
+                        ///< Memory area allocated for flash operations.
 };
 
 }  // namespace LibXR

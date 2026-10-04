@@ -74,7 +74,7 @@ class HIDKeyboard : public HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>
   }
 
   /**
-   * @brief 修饰键枚举 Modifier enum
+   * @brief 修饰键枚举 / Modifier enum
    */
   enum Modifier : uint8_t
   {
@@ -144,18 +144,18 @@ class HIDKeyboard : public HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>
     BACKSPACE = 0x2A,
     TAB = 0x2B,
     SPACE = 0x2C,
-    MINUS = 0x2D,          ///< -
-    EQUAL = 0x2E,          ///< =
-    LEFT_BRACKET = 0x2F,   ///< [
-    RIGHT_BRACKET = 0x30,  ///< ]
-    BACKSLASH = 0x31,      ///< '\'
+    MINUS = 0x2D,          ///< `-`
+    EQUAL = 0x2E,          ///< `=`
+    LEFT_BRACKET = 0x2F,   ///< `[`
+    RIGHT_BRACKET = 0x30,  ///< `]`
+    BACKSLASH = 0x31,      ///< `\`
     NON_US_HASH = 0x32,    ///< Non-US # and ~
-    SEMICOLON = 0x33,      ///< ;
-    APOSTROPHE = 0x34,     ///< '
-    GRAVE = 0x35,          ///< `
-    COMMA = 0x36,          ///< ,
-    PERIOD = 0x37,         ///< .
-    SLASH = 0x38,          ///< /
+    SEMICOLON = 0x33,      ///< `;`
+    APOSTROPHE = 0x34,     ///< `'`
+    GRAVE = 0x35,          ///< `` ` ``
+    COMMA = 0x36,          ///< `,`
+    PERIOD = 0x37,         ///< `.`
+    SLASH = 0x38,          ///< `/`
     CAPS_LOCK = 0x39,
 
     // F1-F12

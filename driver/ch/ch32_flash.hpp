@@ -49,7 +49,7 @@ class CH32Flash : public Flash
   static constexpr uint32_t PageSize()
   {
     return 256;
-  }  ///< Page erase size in fast erase mode / 快速擦除页大小
+  }  ///< 快速擦除页大小 / Page erase size in fast erase mode
 
  private:
   const FlashRegion* regions_;

@@ -74,9 +74,9 @@ class List
     explicit Node(const Data& data) : BaseNode(sizeof(Data)), data_(data) {}
 
     /**
-     * @brief 通过参数列表构造节点 (Constructor initializing a node using arguments list).
-     * @tparam Args 参数类型 (Types of arguments for data initialization).
-     * @param args 数据构造参数 (Arguments used for constructing the data).
+     * @brief 通过参数列表构造节点 / Constructor initializing a node using arguments list.
+     * @tparam Args 参数类型 / Types of arguments for data initialization.
+     * @param args 数据构造参数 / Arguments used for constructing the data.
      */
     template <typename... Args>
     explicit Node(Args&&... args)

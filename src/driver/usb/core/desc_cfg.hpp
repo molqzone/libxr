@@ -13,8 +13,8 @@
 namespace LibXR::USB
 {
 /**
- * @brief USB configuration descriptor attribute bits (bmAttributes)
- *        配置描述符属性位（bmAttributes）
+ * @brief 配置描述符属性位（bmAttributes）
+ *        USB configuration descriptor attribute bits (bmAttributes)
  */
 constexpr uint8_t CFG_BUS_POWERED = 0x80;    ///< 总线供电 / Bus-powered
 constexpr uint8_t CFG_SELF_POWERED = 0x40;   ///< 自供电 / Self-powered

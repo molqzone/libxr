@@ -21,11 +21,11 @@ class Thread
    */
   enum class Priority
   {
-    IDLE = 0,      ///< 空闲优先级 Idle priority
-    LOW = 0,       ///< 低优先级 Low priority
-    MEDIUM = 0,    ///< 中等优先级 Medium priority
-    HIGH = 0,      ///< 高优先级 High priority
-    REALTIME = 0,  ///< 实时优先级 Realtime priority
+    IDLE = 0,      ///< 空闲优先级 / Idle priority
+    LOW = 0,       ///< 低优先级 / Low priority
+    MEDIUM = 0,    ///< 中等优先级 / Medium priority
+    HIGH = 0,      ///< 高优先级 / High priority
+    REALTIME = 0,  ///< 实时优先级 / Realtime priority
     NUMBER = 1,    ///< 优先级数量 / Number of priority levels
   };
 
@@ -38,7 +38,7 @@ class Thread
   /**
    * @brief  通过线程句柄创建线程对象
    *         Constructor to create a thread object from a thread handle
-   * @param  handle 线程句柄 Thread handle
+   * @param  handle 线程句柄 / Thread handle
    */
   Thread(libxr_thread_handle handle) : thread_handle_(handle) {};
 
@@ -101,10 +101,10 @@ class Thread
   /**
    * @brief  让线程休眠直到指定时间点
    *         Puts the thread to sleep until a specified time
-   * @param  last_waskup_time 上次唤醒时间 / Last wake-up time
+   * @param  last_wakeup_time 上次唤醒时间 / Last wake-up time
    * @param  time_to_sleep 休眠时长（毫秒） / Sleep duration in milliseconds
    */
-  static void SleepUntil(MillisecondTimestamp& last_waskup_time, uint32_t time_to_sleep);
+  static void SleepUntil(MillisecondTimestamp& last_wakeup_time, uint32_t time_to_sleep);
 
   /**
    * @brief  让出 CPU 以执行其他线程
@@ -115,12 +115,12 @@ class Thread
   /**
    * @brief  线程对象转换为线程句柄
    *         Converts the thread object to a thread handle
-   * @return 线程句柄 Thread handle
+   * @return 线程句柄 / Thread handle
    */
   operator libxr_thread_handle() { return thread_handle_; }
 
  private:
-  libxr_thread_handle thread_handle_;  ///< 线程句柄 Thread handle
+  libxr_thread_handle thread_handle_;  ///< 线程句柄 / Thread handle
 };
 
 }  // namespace LibXR

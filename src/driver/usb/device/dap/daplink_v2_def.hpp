@@ -19,7 +19,7 @@ namespace DapLinkV2Def
 {
 
 // ==============================
-// Limits / 限制
+// 限制 / Limits
 // ==============================
 
 static constexpr std::uint16_t MAX_REQUEST_SIZE =
@@ -28,7 +28,7 @@ static constexpr std::uint16_t MAX_RESPONSE_SIZE =
     512u;  ///< 最大响应长度 / Max response size.
 
 // ==============================
-// CMSIS-DAP v2 Command IDs / 命令号
+// 命令号 / CMSIS-DAP v2 Command IDs
 // 注意：按规范值定义（SWO_Data=0x1C, SWD_Sequence=0x1D）
 // Note: Values follow the CMSIS-DAP specification (SWO_Data=0x1C, SWD_Sequence=0x1D).
 // ==============================
@@ -76,7 +76,7 @@ enum class CommandId : std::uint8_t
 };
 
 // ==============================
-// DAP_Info IDs / 信息 ID
+// 信息 ID / DAP_Info IDs
 // ==============================
 
 enum class InfoId : std::uint8_t
@@ -100,7 +100,7 @@ enum class InfoId : std::uint8_t
 };
 
 // ==============================
-// Capabilities bits / 能力位（DAP_Info: Capabilities）
+// 能力位（DAP_Info: Capabilities） / Capabilities bits
 // ==============================
 
 static constexpr std::uint8_t DAP_CAP_SWD = 0x01u;   ///< 支持 SWD / Supports SWD.
@@ -108,7 +108,7 @@ static constexpr std::uint8_t DAP_CAP_JTAG = 0x02u;  ///< 支持 JTAG / Supports
 static constexpr std::uint8_t DAP_CAP_SWO = 0x04u;   ///< 支持 SWO / Supports SWO.
 
 // ==============================
-// Status / Port / 状态与端口
+// 状态与端口 / Status / Port
 // ==============================
 
 enum class Status : std::uint8_t
@@ -132,7 +132,7 @@ enum class DebugPort : std::uint8_t
 };
 
 // ==============================
-// Transfer Request bits / 传输请求位
+// 传输请求位 / Transfer Request bits
 // ==============================
 
 static constexpr std::uint8_t DAP_TRANSFER_APNDP = (1u << 0);
@@ -143,7 +143,7 @@ static constexpr std::uint8_t DAP_TRANSFER_MATCH_VALUE = (1u << 4);
 static constexpr std::uint8_t DAP_TRANSFER_MATCH_MASK = (1u << 5);
 static constexpr std::uint8_t DAP_TRANSFER_TIMESTAMP = (1u << 7);  ///< v2
 
-// Transfer Response bits / 传输响应位
+// 传输响应位 / Transfer Response bits
 static constexpr std::uint8_t DAP_TRANSFER_OK = (1u << 0);
 static constexpr std::uint8_t DAP_TRANSFER_WAIT = (1u << 1);
 static constexpr std::uint8_t DAP_TRANSFER_FAULT = (1u << 2);
@@ -152,7 +152,7 @@ static constexpr std::uint8_t DAP_TRANSFER_MISMATCH = (1u << 4);
 static constexpr std::uint8_t DAP_TRANSFER_NO_TARGET = (1u << 7);  ///< v2
 
 // ==============================
-// SWJ Pins bits / SWJ 引脚位
+// SWJ 引脚位 / SWJ Pins bits
 // ==============================
 
 static constexpr std::uint8_t DAP_SWJ_SWCLK_TCK = (1u << 0);
@@ -163,7 +163,7 @@ static constexpr std::uint8_t DAP_SWJ_NTRST = (1u << 5);
 static constexpr std::uint8_t DAP_SWJ_NRESET = (1u << 7);
 
 // ==============================
-// SWD / JTAG Sequence fields / 序列字段
+// 序列字段 / SWD / JTAG Sequence fields
 // ==============================
 
 static constexpr std::uint8_t SWD_SEQUENCE_CLK = 0x3Fu;
@@ -174,7 +174,7 @@ static constexpr std::uint8_t JTAG_SEQUENCE_TMS = (1u << 6);
 static constexpr std::uint8_t JTAG_SEQUENCE_TDO = (1u << 7);
 
 // ==============================
-// Helpers / 工具函数
+// 工具函数 / Helpers
 // ==============================
 
 /// 从 transfer request 字节提取 A[3:2]（2-bit）。
@@ -204,7 +204,7 @@ static inline constexpr bool req_need_timestamp(std::uint8_t req)
 }
 
 // ==============================
-// State structs / 运行态结构体
+// 运行态结构体 / State structs
 // ==============================
 
 struct TransferConfig

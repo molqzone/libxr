@@ -87,10 +87,10 @@ class Topic::Callback
    * @tparam T 待判断的参数类型 / Argument type to inspect
    */
   template <typename T>
-  static constexpr bool IS_MESSAGE_VIEW = MessageViewTraits<
-      RemoveCVRef<T>>::VALUE;  ///< 是否为带时间戳的类型化消息视图参数。Whether
-                               ///< the argument is a timestamped typed
-                               ///< message view.
+  static constexpr bool IS_MESSAGE_VIEW =
+      MessageViewTraits<RemoveCVRef<T>>::VALUE;  ///< 是否为带时间戳的类型化消息视图参数
+                                                 ///< Whether the argument is a
+                                                 ///< timestamped typed message view.
 
   /**
    * @brief 是否为只读 raw payload 视图参数 / Whether one callback payload argument is a
@@ -163,7 +163,7 @@ class Topic::Callback
 
     RunFun run = nullptr;  ///< 当前块的执行函数 / Execution function of the current
                            ///< block.
-    TypeID::ID payload_type_id = nullptr;  ///< 该回调期望的主题负载类型标识。Expected
+    TypeID::ID payload_type_id = nullptr;  ///< 该回调期望的主题负载类型标识 / Expected
                                            ///< topic payload type identifier.
     bool accepts_raw_payload = false;      ///< 是否按 raw payload 视图接收 / Whether this
                                            ///< callback receives a raw payload view.
@@ -398,10 +398,9 @@ class Topic::Callback
   struct Factory<Function, BoundArg, 3>
   {
     using Traits = FunctionTraits<Function>;  ///< 回调签名信息 / Callback signature info.
-    using PayloadArg =
-        typename Traits::template Arg<2>;  ///< 第三个参数，即负载参数类型。Third
-                                           ///< argument, namely the
-                                           ///< payload argument type.
+    using PayloadArg = typename Traits::template Arg<2>;  ///< 第三个参数，即负载参数类型
+                                                          ///< Third argument, namely the
+                                                          ///< payload argument type.
 
     /**
      * @brief 创建只转发负载的回调块 / Create one callback block that forwards only the
@@ -431,13 +430,12 @@ class Topic::Callback
   {
     using Traits = FunctionTraits<Function>;  ///< 回调签名信息 / Callback signature info.
     using TimestampArg =
-        typename Traits::template Arg<2>;  ///< 第三个参数，即时间戳参数类型。Third
+        typename Traits::template Arg<2>;  ///< 第三个参数，即时间戳参数类型 / Third
                                            ///< argument, namely the
                                            ///< timestamp argument type.
-    using PayloadArg =
-        typename Traits::template Arg<3>;  ///< 第四个参数，即负载参数类型。Fourth
-                                           ///< argument, namely the
-                                           ///< payload argument type.
+    using PayloadArg = typename Traits::template Arg<3>;  ///< 第四个参数，即负载参数类型
+                                                          ///< Fourth argument, namely the
+                                                          ///< payload argument type.
 
     /**
      * @brief 创建同时转发时间戳和负载的回调块 / Create one callback block that forwards

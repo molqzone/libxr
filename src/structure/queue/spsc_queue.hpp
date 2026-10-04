@@ -10,8 +10,7 @@ namespace LibXR
 {
 /**
  * @class SPSCQueue
- * @brief 单生产者单消费者无锁队列。
- * @brief Single-producer single-consumer lock-free queue.
+ * @brief 单生产者单消费者无锁队列 / Single-producer single-consumer lock-free queue.
  *
  * 模板壳只把 `Data` 映射为固定大小的字节 payload 并复用 `SPSCQueueBase`，
  * 不在队列内部管理 `Data` 对象生命周期。调用方必须保证 payload 可以按该
@@ -38,8 +37,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   using QueueTypedBase<SPSCQueue<Data>, Data>::Push;
 
   /**
-   * @brief 构造一个 SPSC 队列。
-   * @brief Construct one SPSC queue.
+   * @brief 构造一个 SPSC 队列 / Construct one SPSC queue.
    * @param length 队列容量 / Queue capacity.
    *
    * @note 包含动态内存分配 / Contains dynamic memory allocation.
@@ -49,14 +47,12 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
-   * @brief 析构一个 SPSC 队列。
-   * @brief Destroy one SPSC queue.
+   * @brief 析构一个 SPSC 队列 / Destroy one SPSC queue.
    */
   ~SPSCQueue() = default;
 
   /**
-   * @brief 查看一个队头 payload 但不出队。
-   * @brief Peek one front payload without dequeuing it.
+   * @brief 查看一个队头 payload 但不出队 / Peek one front payload without dequeuing it.
    * @param item 用于接收 payload / Receives the peeked payload.
    * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`
    *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
@@ -65,8 +61,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   ErrorCode Peek(Data& item) { return SPSCQueueBase::PeekBytes(&item); }
 
   /**
-   * @brief 批量推入多个 payload。
-   * @brief Push multiple payloads into the queue.
+   * @brief 批量推入多个 payload / Push multiple payloads into the queue.
    * @param data payload 数组指针 / Pointer to the payload array.
    * @param size payload 个数 / Number of payloads.
    * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`
@@ -79,8 +74,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
-   * @brief 通过写入器回调推入一个 payload。
-   * @brief Push one payload via a writer callback.
+   * @brief 通过写入器回调推入一个 payload / Push one payload via a writer callback.
    * @tparam Writer 写入器类型 / Writer callback type.
    * @param writer 写入器回调，签名为 `ErrorCode(Data* buffer, size_t count)`
    *        Writer callback with signature `ErrorCode(Data* buffer, size_t count)`.
@@ -99,8 +93,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
-   * @brief 通过写入器回调批量推入 payload。
-   * @brief Push multiple payloads via a writer callback.
+   * @brief 通过写入器回调批量推入 payload / Push multiple payloads via a writer callback.
    * @tparam Writer 写入器类型 / Writer callback type.
    * @param size payload 个数 / Number of payloads.
    * @param writer 写入器回调，签名为 `ErrorCode(Data* buffer, size_t count)`。
@@ -165,8 +158,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
-   * @brief 通过读取器回调弹出一个 payload。
-   * @brief Pop one payload via a reader callback.
+   * @brief 通过读取器回调弹出一个 payload / Pop one payload via a reader callback.
    * @tparam Reader 读取器类型 / Reader callback type.
    * @param reader 读取器回调，签名为 `ErrorCode(const Data* buffer, size_t count)`
    *        Reader callback with signature `ErrorCode(const Data* buffer, size_t count)`.
@@ -185,8 +177,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
-   * @brief 通过读取器回调批量弹出 payload。
-   * @brief Pop multiple payloads via a reader callback.
+   * @brief 通过读取器回调批量弹出 payload / Pop multiple payloads via a reader callback.
    * @tparam Reader 读取器类型 / Reader callback type.
    * @param size payload 个数 / Number of payloads.
    * @param reader 读取器回调，签名为 `ErrorCode(const Data* buffer, size_t count)`。
@@ -252,8 +243,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
-   * @brief 批量弹出多个 payload。
-   * @brief Pop multiple payloads from the queue.
+   * @brief 批量弹出多个 payload / Pop multiple payloads from the queue.
    * @param data 用于接收 payload 的数组 / Array receiving dequeued payloads.
    * @param size payload 个数 / Number of payloads.
    * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`
@@ -266,8 +256,7 @@ class SPSCQueue final : public QueueTypedBase<SPSCQueue<Data>, Data>, public SPS
   }
 
   /**
-   * @brief 批量查看多个 payload 但不出队。
-   * @brief Peek multiple payloads without dequeuing them.
+   * @brief 批量查看多个 payload 但不出队 / Peek multiple payloads without dequeuing them.
    * @param data 用于接收 payload 的数组 / Array receiving peeked payloads.
    * @param size payload 个数 / Number of payloads.
    * @return 成功返回 `ErrorCode::OK`；队列空返回 `ErrorCode::EMPTY`

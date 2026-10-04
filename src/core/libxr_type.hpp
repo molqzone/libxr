@@ -14,7 +14,7 @@ namespace Detail
 {
 /**
  * @brief 仅裁掉数组末尾的一个 `\\0`；其余字节按原始数据保留。
- * @brief Trim at most one trailing `\\0` from a bounded char array and keep all
+ *        Trim at most one trailing `\\0` from a bounded char array and keep all
  *        preceding bytes untouched.
  */
 template <size_t N>
@@ -235,7 +235,7 @@ class ConstRawData
 
   /**
    * @brief 从字符数组构造 `ConstRawData`；若最后一个字符是 `\\0`，仅忽略这一尾随终止符。
-   * @brief Constructs `ConstRawData` from a character array; if the last element
+   *        Constructs `ConstRawData` from a character array; if the last element
    *        is `\\0`, only that trailing terminator is ignored.
    *
    * @tparam N 数组大小。

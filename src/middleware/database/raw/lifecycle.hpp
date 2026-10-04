@@ -11,11 +11,11 @@
 
 /**
  * @brief 获取数据库中的键值
- *        (Retrieve the key's value from the database).
- * @param key 需要获取的键 (Key to retrieve).
+ *        Retrieve the key's value from the database.
+ * @param key 需要获取的键 / Key to retrieve.
  * @return 操作结果，如果找到则返回 `ErrorCode::OK`，否则返回 `ErrorCode::NOT_FOUND`
- *         (Operation result, returns `ErrorCode::OK` if found, otherwise
- *         `ErrorCode::NOT_FOUND`).
+ *         Operation result, returns `ErrorCode::OK` if found, otherwise
+ *         `ErrorCode::NOT_FOUND`.
  */
 ErrorCode Get(Database::KeyBase& key) override
 {
@@ -40,10 +40,10 @@ ErrorCode Get(Database::KeyBase& key) override
 
 /**
  * @brief 设置数据库中的键值
- *        (Set the key's value in the database).
- * @param key 目标键 (Target key).
- * @param data 需要存储的新值 (New value to store).
- * @return 操作结果 (Operation result).
+ *        Set the key's value in the database.
+ * @param key 目标键 / Target key.
+ * @param data 需要存储的新值 / New value to store.
+ * @return 操作结果 / Operation result.
  */
 ErrorCode Set(KeyBase& key, RawData data) override
 {
@@ -51,9 +51,9 @@ ErrorCode Set(KeyBase& key, RawData data) override
 }
 
 /**
- * @brief 添加新键到数据库 (Add a new key to the database).
- * @param key 需要添加的键 (Key to add).
- * @return 操作结果 (Operation result).
+ * @brief 添加新键到数据库 / Add a new key to the database.
+ * @param key 需要添加的键 / Key to add.
+ * @return 操作结果 / Operation result.
  */
 ErrorCode Add(KeyBase& key) override
 {
@@ -62,10 +62,10 @@ ErrorCode Add(KeyBase& key) override
 
 /**
  * @brief 构造函数，初始化 Flash 存储和缓冲区
- *        (Constructor to initialize Flash storage and buffer).
+ *        Constructor to initialize Flash storage and buffer.
  *
- * @param flash 目标 Flash 存储设备 (Target Flash storage device).
- * @param recycle_threshold 回收阈值 (Recycle threshold).
+ * @param flash 目标 Flash 存储设备 / Target Flash storage device.
+ * @param recycle_threshold 回收阈值 / Recycle threshold.
  */
 explicit DatabaseRaw(Flash& flash, size_t recycle_threshold = 128)
     : recycle_threshold_(recycle_threshold), flash_(flash)
@@ -79,7 +79,7 @@ explicit DatabaseRaw(Flash& flash, size_t recycle_threshold = 128)
 
 /**
  * @brief 初始化数据库存储区，确保主备块正确
- *        (Initialize database storage, ensuring main and backup blocks are valid).
+ *        Initialize database storage, ensuring main and backup blocks are valid.
  * @note 启动策略是：优先相信合法主块；主块损坏时才尝试从合法且非空的备份块恢复；若
  *       主块已好而备份块仍残留，则把备份块失效掉，避免它继续被当作恢复来源。
  *       The startup policy is: trust a valid main block first; recover from a
@@ -156,7 +156,7 @@ void Init()
 
 /**
  * @brief 还原存储数据，清空 Flash 区域
- *        (Restore storage data, clearing Flash memory area).
+ *        Restore storage data, clearing Flash memory area.
  * @note 这里会把主块和备份块都重新初始化为空块，不保留任何旧键。
  *       This reinitializes both the main block and the backup block into
  *       empty blocks and keeps no previous key.
@@ -169,13 +169,13 @@ void Restore()
 
 /**
  * @brief 回收 Flash 空间，整理数据
- *        (Recycle Flash storage space and organize data).
+ *        Recycle Flash storage space and organize data.
  *
+ * 将主存储块中的有效键移动到备份块，并擦除主存储块。
  * Moves valid keys from the main block to the backup block and erases the main
  * block.
- * 将主存储块中的有效键移动到备份块，并擦除主存储块。
  *
- * @return 操作结果 (Operation result).
+ * @return 操作结果 / Operation result.
  * @note 当前流程把备份块当作临时整理区：先把主块中的活跃键顺序搬过去，再用备份块的
  *       活跃前缀回写主块，最后把备份块重新清为空块。
  *       The current flow treats the backup block as a temporary compaction
