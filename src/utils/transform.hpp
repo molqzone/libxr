@@ -853,7 +853,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
     const Eigen::Matrix<Scalar, 3, 3>& r = (*this);
 
     Scalar roll = std::asin(r(2, 1));
-    Scalar yaw = std::atan2(r(1, 1), -r(0, 1));
+    Scalar yaw = std::atan2(-r(0, 1), r(1, 1));
     Scalar pitch = std::atan2(-r(2, 0), r(2, 2));
 
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);
