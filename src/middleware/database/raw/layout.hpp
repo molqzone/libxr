@@ -53,11 +53,24 @@ class BlockBoolUtil
    * @brief 从位图块读取布尔值 / Decode one boolean value from a flag block.
    * @param obj 待读取位图块 / Flag block to inspect.
    * @return 解码出的布尔值 / Decoded boolean value.
+   * @note 标志只会从 `true`（擦除态）写成 `false`，且只写一次；只要有一位已被编程，
+   *       就说明这次写入已经开始，因此只有整块都是 `0xFF` 才读作 `true`。被掉电打断的
+   *       写入读作它要写成的 `false`。
+   *       A flag is written at most once, from `true` (erased) to `false`; any
+   *       programmed bit means that write has started, so only a fully erased
+   *       block reads as `true`, and a write cut by a power loss reads as the
+   *       `false` it was writing.
    */
   static bool ReadFlag(const BlockBoolData<BlockSize>& obj)
   {
-    uint8_t last_4bits = obj.data[BlockSize - 1] & 0x0F;
-    return last_4bits == 0x0F;
+    for (size_t i = 0; i < BlockSize; ++i)
+    {
+      if (obj.data[i] != 0xFF)
+      {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

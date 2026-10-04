@@ -41,14 +41,13 @@ size_t GetChecksumOffset() { return block_size_ - GetChecksumSize(); }
 size_t GetChecksumSize() { return AlignSize(sizeof(CHECKSUM_BYTE)); }
 
 /**
- * @brief 把指定块初始化为空数据库块 / Initialize one block as an empty database block.
+ * @brief 擦除一个块并写入块头和空哨兵 / Erase one block and write its header and an
+ *        empty sentinel.
  * @param block 目标块类型 / Target block type.
- * @note 初始化后的块是“结构合法但没有任何用户键”的空块：块头有效、首个哨兵键有效、
- *       尾校验有效。
- *       After initialization, the block is a structurally valid empty block:
- *       valid header, valid sentinel key, and valid trailing checksum.
+ * @note 不写块尾校验。
+ *       The trailing checksum is not written.
  */
-void InitBlock(BlockType block)
+void WriteEmptyBlockPrefix(BlockType block)
 {
   const size_t offset = GetBlockOffset(block);
   EraseFlashOrExit(offset, block_size_);
@@ -62,7 +61,147 @@ void InitBlock(BlockType block)
   tmp_key.SetNameLength(0);
   tmp_key.SetDataSize(0);
   WriteFlashOrExit(offset, {reinterpret_cast<uint8_t*>(&info), sizeof(FlashInfo)});
-  WriteFlashOrExit(offset + GetChecksumOffset(), {&CHECKSUM_BYTE, sizeof(CHECKSUM_BYTE)});
+}
+
+/**
+ * @brief 写入块尾校验 / Write the trailing checksum of a block.
+ * @param block 目标块类型 / Target block type.
+ */
+void WriteBlockChecksum(BlockType block)
+{
+  WriteFlashOrExit(GetBlockOffset(block) + GetChecksumOffset(),
+                   {&CHECKSUM_BYTE, sizeof(CHECKSUM_BYTE)});
+}
+
+/**
+ * @brief 把指定块初始化为空数据库块 / Initialize one block as an empty database block.
+ * @param block 目标块类型 / Target block type.
+ * @note 初始化后的块是“结构合法但没有任何用户键”的空块：块头有效、首个哨兵键有效、
+ *       尾校验有效。
+ *       After initialization, the block is a structurally valid empty block:
+ *       valid header, valid sentinel key, and valid trailing checksum.
+ */
+void InitBlock(BlockType block)
+{
+  WriteEmptyBlockPrefix(block);
+  WriteBlockChecksum(block);
+}
+
+/**
+ * @brief 把备份块准备成回收可以直接写入的状态
+ *        Prepare the backup block so a recycle can write into it directly.
+ * @note 备份块只有块头和空哨兵，没有块尾校验。
+ *       The backup block holds only the header and an empty sentinel, without
+ *       the trailing checksum.
+ */
+void PrepareBackup() { WriteEmptyBlockPrefix(BlockType::BACKUP); }
+
+/**
+ * @brief 判断备份块是否处于 `PrepareBackup()` 之后的状态
+ *        Check whether the backup block is in the state `PrepareBackup()` leaves.
+ * @return 块头有效、哨兵为空、哨兵之后直到块尾都是擦除态时返回 `true`
+ *         Returns `true` when the header is valid, the sentinel is empty, and
+ *         everything after the sentinel up to the block end is erased.
+ * @note 被打断的回收会在哨兵后面留下已写入的键，再往这些位置写入就是对已编程单元的
+ *       二次编程，因此这里检查到块尾。
+ *       An interrupted recycle leaves written keys after the sentinel, and
+ *       writing there again would program units twice, so the check runs to the
+ *       block end.
+ */
+bool IsBackupPrepared()
+{
+  const size_t sentinel_offset = GetSentinelOffset(BlockType::BACKUP);
+  FlashInfo info;
+  ReadFlashOrExit(GetBlockOffset(BlockType::BACKUP), info);
+  if (info.header != FLASH_HEADER ||
+      !BlockBoolUtil<MinWriteSize>::ReadFlag(info.key.no_next_key) ||
+      !BlockBoolUtil<MinWriteSize>::ReadFlag(info.key.available_flag) ||
+      info.key.raw_info != 0)
+  {
+    return false;
+  }
+  return IsErased(sentinel_offset + AlignSize(sizeof(KeyInfo)),
+                  GetBlockOffset(BlockType::BACKUP) + block_size_);
+}
+
+/**
+ * @brief 计算备份块 CRC 单元的字节数 / Compute the byte size of the backup CRC unit.
+ * @return CRC 单元字节数 / Byte size of the CRC unit.
+ */
+size_t GetCrcSize() { return AlignSize(sizeof(uint32_t)); }
+
+/**
+ * @brief 计算备份块前缀的 CRC32 / Compute the CRC32 of the backup block prefix.
+ * @param used_size 前缀字节数 / Byte size of the prefix.
+ * @return CRC32（多项式 0xEDB88320） / CRC32 (polynomial 0xEDB88320).
+ */
+uint32_t GetBackupCrc(size_t used_size)
+{
+  uint32_t crc = 0xFFFFFFFFU;
+  uint8_t buffer[32];
+  const size_t offset = GetBlockOffset(BlockType::BACKUP);
+  for (size_t done = 0; done < used_size;)
+  {
+    const size_t size = LibXR::min<size_t>(sizeof(buffer), used_size - done);
+    ReadFlashOrExit(offset + done, RawData(buffer, size));
+    for (size_t i = 0; i < size; ++i)
+    {
+      crc ^= buffer[i];
+      for (int bit = 0; bit < 8; ++bit)
+      {
+        crc = (crc >> 1) ^ (0xEDB88320U & (0U - (crc & 1U)));
+      }
+    }
+    done += size;
+  }
+  return ~crc;
+}
+
+/**
+ * @brief 判断备份块是否可以用来恢复主块（旧版本的判断）
+ *        Check whether the backup block can restore the main block (the check of
+ *        older versions).
+ * @param used_size 返回备份块活跃前缀的字节数 / Receives the byte size of the live prefix
+ *        of the backup block.
+ * @return 备份块有效、非空且链表完整时返回 `true`
+ *         Returns `true` when the backup is valid and not empty and its chain is
+ *         complete.
+ * @note 旧版本在回收开始时就写好备份块校验，回收被打断时链表也可能恰好完整，所以只在
+ *       主块无效时才用这个判断。
+ *       Older versions wrote the backup checksum when a recycle started, and the
+ *       chain of a cut copy can happen to be complete, so this check is used only
+ *       when the main block is invalid.
+ */
+bool IsBackupRestorable(size_t& used_size)
+{
+  return IsBlockValid(BlockType::BACKUP) && !IsBlockEmpty(BlockType::BACKUP) &&
+         TryGetUsedBlockSize(BlockType::BACKUP, used_size);
+}
+
+/**
+ * @brief 判断备份块是否是一次回收写完的完整拷贝
+ *        Check whether the backup block is the complete copy written by a recycle.
+ * @param used_size 返回备份块活跃前缀的字节数 / Receives the byte size of the live prefix
+ *        of the backup block.
+ * @return 备份块可以恢复主块，且链表之后的 CRC 单元与前缀的 CRC32 相符时返回 `true`
+ *         Returns `true` when the backup can restore the main block and the CRC
+ *         unit after its chain matches the CRC32 of the prefix.
+ * @note 回收写完所有键之后才写 CRC 单元和块尾校验。擦除被打断时，前缀或 CRC 单元里
+ *       任何一位回到 1 都会使 CRC 不符，所以不需要另外作废用过的拷贝。
+ *       A recycle writes the CRC unit and the trailing checksum only after all
+ *       keys. When an erase is interrupted, any bit of the prefix or the CRC unit
+ *       that returns to 1 breaks the CRC, so a used copy needs no separate
+ *       invalidation.
+ */
+bool IsBackupComplete(size_t& used_size)
+{
+  if (!IsBackupRestorable(used_size) || used_size + GetCrcSize() > GetChecksumOffset())
+  {
+    return false;
+  }
+  uint32_t stored_crc = 0;
+  ReadFlashOrExit(GetBlockOffset(BlockType::BACKUP) + used_size, stored_crc);
+  return stored_crc == GetBackupCrc(used_size);
 }
 
 /**
@@ -113,24 +252,59 @@ bool IsBlockError(BlockType block)
  * @brief 判断块整体是否处于可用状态
  *        Check whether the block as a whole is currently usable.
  * @param block 目标块类型 / Target block type.
- * @return 若块头和校验都有效则返回 `true`
- *         Returns `true` when both header and checksum are valid.
+ * @return 若块头、校验有效且哨兵没有名字和数据则返回 `true`
+ *         Returns `true` when the header and checksum are valid and the sentinel
+ *         has no name and no payload.
+ * @note 链表从哨兵开始，哨兵的长度字段不为 0 时链表的起点就不可信。
+ *       The chain starts at the sentinel, so a non-zero length field in the
+ *       sentinel makes the start of the chain untrustworthy.
  */
 bool IsBlockValid(BlockType block)
 {
-  return IsBlockInited(block) && !IsBlockError(block);
+  if (!IsBlockInited(block) || IsBlockError(block))
+  {
+    return false;
+  }
+  KeyInfo sentinel;
+  ReadFlashOrExit(GetSentinelOffset(block), sentinel);
+  return sentinel.raw_info == 0;
 }
 
 /**
- * @brief 使指定块尾校验失效 / Invalidate the checksum of one block.
+ * @brief 计算块内哨兵键头的偏移 / Compute the offset of the sentinel key header of a
+ *        block.
  * @param block 目标块类型 / Target block type.
+ * @return 哨兵键头偏移 / Offset of the sentinel key header.
  */
-void InvalidateBlock(BlockType block)
+size_t GetSentinelOffset(BlockType block)
 {
-  const uint32_t invalid_checksum = 0;
-  // Keep startup cleanup erase-free so same-bank MCUs only pay a single program op.
-  WriteFlashOrExit(GetBlockOffset(block) + GetChecksumOffset(),
-                   {&invalid_checksum, sizeof(invalid_checksum)});
+  return GetBlockOffset(block) + LibXR::OffsetOf(&FlashInfo::key);
+}
+
+/**
+ * @brief 判断一段 Flash 是否全部处于擦除态 / Check whether a Flash range is fully erased.
+ * @param offset 起始偏移 / Start offset.
+ * @param end 结束偏移（不含） / End offset, exclusive.
+ * @return 若每个字节都是 `0xFF` 则返回 `true`
+ *         Returns `true` when every byte is `0xFF`.
+ */
+bool IsErased(size_t offset, size_t end)
+{
+  uint8_t buffer[32];
+  while (offset < end)
+  {
+    const size_t size = LibXR::min<size_t>(sizeof(buffer), end - offset);
+    ReadFlashOrExit(offset, RawData(buffer, size));
+    for (size_t i = 0; i < size; ++i)
+    {
+      if (buffer[i] != 0xFF)
+      {
+        return false;
+      }
+    }
+    offset += size;
+  }
+  return true;
 }
 
 /**
@@ -196,15 +370,7 @@ bool TryGetUsedBlockSize(BlockType block, size_t& used_size)
  */
 size_t GetUsedBlockSize(BlockType block)
 {
-  const size_t block_offset = GetBlockOffset(block);
-  const size_t first_key_offset = block_offset + LibXR::OffsetOf(&FlashInfo::key);
-
-  if (IsBlockEmpty(block))
-  {
-    return GetNextKey(first_key_offset) - block_offset;
-  }
-
-  return GetNextKey(GetLastKey(block)) - block_offset;
+  return GetNextKey(GetLastKey(block)) - GetBlockOffset(block);
 }
 
 /**
