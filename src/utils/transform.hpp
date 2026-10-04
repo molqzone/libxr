@@ -179,7 +179,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    */
   const Position& operator/=(const Eigen::Matrix<Scalar, 3, 3>& R)
   {
-    *this = R.transpose() * Eigen::Map<const Eigen::Matrix<Scalar, 3, 1>>(this->data_);
+    *this = R.transpose() * Eigen::Map<const Eigen::Matrix<Scalar, 3, 1>>(this->data());
     return *this;
   }
 
@@ -191,7 +191,7 @@ class Position : public Eigen::Matrix<Scalar, 3, 1>
    */
   const Position& operator/=(const Eigen::Quaternion<Scalar>& q)
   {
-    *this = q.conjugate() * Eigen::Map<const Eigen::Matrix<Scalar, 3, 1>>(this->data_);
+    *this = q.conjugate() * Eigen::Map<const Eigen::Matrix<Scalar, 3, 1>>(this->data());
     return *this;
   }
 
@@ -1184,7 +1184,7 @@ class Transform
    */
   Transform& operator=(const Eigen::AngleAxis<Scalar>& a)
   {
-    rotation = a;
+    rotation = Eigen::Quaternion<Scalar>(a);
     return *this;
   }
 
@@ -1221,7 +1221,8 @@ class Transform
    */
   Transform operator-(const Transform& t) const
   {
-    return Transform(rotation / t.rotation, translation - t.translation);
+    return Transform(rotation / t.rotation,
+                     Eigen::Matrix<Scalar, 3, 1>(translation - t.translation));
   }
 };
 

@@ -182,7 +182,7 @@ class Inertia
    */
   Inertia Rotate(const RotationMatrix<Scalar>& R) const
   {
-    return Rotate(Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(R.data_));
+    return Rotate(Eigen::Map<const Eigen::Matrix<Scalar, 3, 3>>(R.data()));
   }
 
   /**
