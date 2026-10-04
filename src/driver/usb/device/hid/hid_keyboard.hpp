@@ -462,7 +462,7 @@ class HIDKeyboard : public HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>
    * @brief 获取 NumLock 状态 / Get NumLock status
    * @return true 开启 / Enabled, false 关闭 / Disabled
    */
-  bool GetNumLock() { return (led_state_ & 0x04) != 0; }
+  bool GetNumLock() { return (led_state_ & 0x01) != 0; }
 
   /**
    * @brief 获取 CapsLock 状态 / Get CapsLock status
@@ -474,7 +474,7 @@ class HIDKeyboard : public HID<sizeof(HID_KEYBOARD_REPORT_DESC), 8, 1>
    * @brief 获取 ScrollLock 状态 / Get ScrollLock status
    * @return true 开启 / Enabled, false 关闭 / Disabled
    */
-  bool GetScrollLock() { return (led_state_ & 0x01) != 0; }
+  bool GetScrollLock() { return (led_state_ & 0x04) != 0; }
 
   /**
    * @brief 设置 LED 状态变化回调 / Set LED state change callback
