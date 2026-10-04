@@ -57,7 +57,39 @@ ErrorCode STM32PWM::SetDutyCycle(float value)
   uint32_t pulse =
       static_cast<uint32_t>(static_cast<float>(htim_->Init.Period + 1) * value);
 
-  __HAL_TIM_SET_COMPARE(htim_, channel_, pulse);
+  // 按通道直接写比较寄存器，映射与 __HAL_TIM_SET_COMPARE 相同（未列出的通道值写最后一个
+  // 寄存器）。HAL 宏用条件表达式取用 volatile 赋值的结果，C++20 下会产生弃用警告。
+  // Write the compare register of the channel directly, with the same mapping as
+  // __HAL_TIM_SET_COMPARE (an unlisted channel value writes the last register). The HAL
+  // macro uses the result of a volatile assignment in a conditional expression, which is
+  // deprecated in C++20.
+  switch (channel_)
+  {
+    case TIM_CHANNEL_1:
+      htim_->Instance->CCR1 = pulse;
+      break;
+    case TIM_CHANNEL_2:
+      htim_->Instance->CCR2 = pulse;
+      break;
+    case TIM_CHANNEL_3:
+      htim_->Instance->CCR3 = pulse;
+      break;
+#if defined(TIM_CHANNEL_5) && defined(TIM_CHANNEL_6)
+    case TIM_CHANNEL_4:
+      htim_->Instance->CCR4 = pulse;
+      break;
+    case TIM_CHANNEL_5:
+      htim_->Instance->CCR5 = pulse;
+      break;
+    default:
+      htim_->Instance->CCR6 = pulse;
+      break;
+#else
+    default:
+      htim_->Instance->CCR4 = pulse;
+      break;
+#endif
+  }
 
   return ErrorCode::OK;
 }
