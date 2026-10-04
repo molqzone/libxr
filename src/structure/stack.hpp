@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstring>
+#include <type_traits>
 
 #include "libxr_def.hpp"
 #include "mutex.hpp"
@@ -37,6 +38,16 @@ class Stack
    *       Contains dynamic memory allocation.
    */
   Stack(uint32_t depth) : stack_(new Data[depth]), depth_(depth) {}
+
+  /**
+   * @brief 析构栈并释放存储数组 / Destroys the stack and frees the storage array
+   */
+  ~Stack() { delete[] stack_; }
+
+  /// @brief 禁止复制构造 / Not copy-constructible
+  Stack(const Stack&) = delete;
+  /// @brief 禁止复制赋值 / Not copy-assignable
+  Stack& operator=(const Stack&) = delete;
 
   /**
    * @brief 获取指定索引的元素 / Retrieves the element at a specified index
@@ -162,9 +173,17 @@ class Stack
    * `ErrorCode::FULL`，索引超出范围返回 `ErrorCode::OUT_OF_RANGE` / Operation result:
    * returns `ErrorCode::OK` on success, `ErrorCode::FULL` if the stack is full,
    * `ErrorCode::OUT_OF_RANGE` if the index is out of range
+   *
+   * @note 插入位置之后的元素按字节搬移，因此 `Data` 必须可平凡复制，否则编译失败。
+   *       The elements after the position are moved byte by byte, so `Data` must be
+   *       trivially copyable; otherwise the call does not compile.
    */
   ErrorCode Insert(const Data& data, uint32_t index)
   {
+    static_assert(std::is_trivially_copyable_v<Data>,
+                  "Stack::Insert moves elements with memmove and requires a trivially "
+                  "copyable element type");
+
     mutex_.Lock();
     if (top_ >= depth_)
     {
