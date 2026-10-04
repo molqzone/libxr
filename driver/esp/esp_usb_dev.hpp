@@ -53,7 +53,7 @@ class ESP32USBDevice : public USB::EndpointPool, public USB::DeviceCore
      * @brief 使用同一块 buffer 同时生成 IN/OUT endpoint / Create both IN and OUT
      * endpoints from one shared buffer
      */
-    explicit EPConfig(RawData buffer) : buffer(buffer) {}
+    EPConfig(RawData buffer) : buffer(buffer) {}
 
     /**
      * @brief 使用同一块 buffer 生成单方向 endpoint / Create a single-direction endpoint
