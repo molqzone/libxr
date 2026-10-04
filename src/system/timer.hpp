@@ -147,10 +147,12 @@ class Timer
    * @details
    * 该方法遍历任务列表，并检查任务是否应当运行。
    * 若任务启用，并且 `count_` 达到 `cycle_`，则执行任务并重置计数器。
+   * 第一次 `Add()` 之前任务列表尚未创建，此时直接返回。
    *
    * This method iterates through the task list and checks whether a task should run.
    * If a task is enabled and its `count_` reaches `cycle_`, the task is executed and the
-   * counter is reset.
+   * counter is reset. Before the first `Add()` the task list does not exist yet, and the
+   * method returns at once.
    */
   static void Refresh();
   /**

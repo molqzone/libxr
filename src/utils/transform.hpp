@@ -346,6 +346,25 @@ class Axis : public Eigen::Matrix<Scalar, 3, 1>
  * @class EulerAngle
  * @brief 表示欧拉角的类，用于描述3D旋转。
  *        Class representing Euler angles for 3D rotation.
+ *
+ * 三个分量依次为 roll（绕 X 轴）、pitch（绕 Y 轴）和 yaw（绕 Z 轴），单位为弧度。
+ * `ToRotationMatrixABC()` 返回 R_A·R_B·R_C，其中 R_X、R_Y、R_Z 是绕对应坐标轴分别转过
+ * roll、pitch、yaw 的基本旋转矩阵，例如 `ToRotationMatrixXYZ()` 等于
+ * Rx(roll)·Ry(pitch)·Rz(yaw)。作用于列向量时，这相当于先绕 A 轴、再绕转动后的 B 轴、
+ * 最后绕转动后的 C 轴的内旋，也相当于依次绕固定的 C、B、A 轴的外旋。默认顺序 ZYX 即
+ * 先 yaw、再 pitch、最后 roll 的内旋。`ToQuaternionABC()` 表示同一个旋转；
+ * `RotationMatrix` 和 `Quaternion` 的 `ToEulerAngleABC()` 按同一约定求回三个角。
+ *
+ * The three components are roll (about X), pitch (about Y) and yaw (about Z), in
+ * radians. `ToRotationMatrixABC()` returns R_A·R_B·R_C, where R_X, R_Y and R_Z are the
+ * elementary rotations by roll, pitch and yaw about the corresponding axes; for example
+ * `ToRotationMatrixXYZ()` equals Rx(roll)·Ry(pitch)·Rz(yaw). Applied to column vectors,
+ * this is an intrinsic rotation about A, then the rotated B, then the rotated C, which
+ * is the same as an extrinsic rotation about the fixed axes C, B and A in that order.
+ * The default order ZYX is the intrinsic yaw, pitch, roll sequence. `ToQuaternionABC()`
+ * represents the same rotation, and `ToEulerAngleABC()` of `RotationMatrix` and
+ * `Quaternion` recovers the angles under the same convention.
+ *
  * @tparam Scalar 数据类型，如 float 或 double / Data type, such as float or double.
  */
 template <typename Scalar>
@@ -834,7 +853,7 @@ class RotationMatrix : public Eigen::Matrix<Scalar, 3, 3>
     const Eigen::Matrix<Scalar, 3, 3>& r = (*this);
 
     Scalar roll = std::asin(r(2, 1));
-    Scalar yaw = std::atan2(r(1, 1), -r(0, 1));
+    Scalar yaw = std::atan2(-r(0, 1), r(1, 1));
     Scalar pitch = std::atan2(-r(2, 0), r(2, 2));
 
     return Eigen::Matrix<Scalar, 3, 1>(roll, pitch, yaw);

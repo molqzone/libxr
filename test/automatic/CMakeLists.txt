@@ -152,6 +152,25 @@ set_tests_properties(
                              "${PROJECT_SOURCE_DIR}"
 )
 
+# Stack::Insert 对不可平凡复制的元素类型必须编译失败。目标不参与默认构建，由测试单独构建，
+# 并检查输出中有 static_assert 的报错文字。
+# Stack::Insert must not compile for an element type that is not trivially copyable. The
+# target is left out of the default build; the test builds it and checks the output for
+# the static_assert message.
+add_library(
+  test_stack_insert_nontrivial OBJECT EXCLUDE_FROM_ALL
+  structure/stack/stack_insert_nontrivial.cpp
+)
+target_link_libraries(test_stack_insert_nontrivial PRIVATE xr)
+add_test(NAME stack_insert_nontrivial
+         COMMAND "${CMAKE_COMMAND}" --build "${CMAKE_BINARY_DIR}" --config $<CONFIG>
+                 --target test_stack_insert_nontrivial
+)
+set_tests_properties(
+  stack_insert_nontrivial PROPERTIES PASS_REGULAR_EXPRESSION
+                                     "requires a trivially copyable element type" TIMEOUT 120
+)
+
 add_library(
   test_print_config_matrix OBJECT
   core/print/print/test_float_disabled.cpp

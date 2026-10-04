@@ -848,6 +848,21 @@ class LinuxSharedTopic : public Topic
 
   /**
    * @brief 发布一个已申请好的 payload 句柄 / Publish a pre-acquired payload handle.
+   * @param data 由本 Topic 的 CreateData() 申请的句柄 / Handle acquired by CreateData()
+   *        of this Topic.
+   * @return OK：已发布（没有订阅者时直接丢弃）；FULL：订阅者队列已满或没有可选的
+   *         BALANCE_RR 订阅者；STATE_ERR：句柄无效或不属于本 Topic。
+   *         OK: published (dropped when there is no subscriber); FULL: a subscriber
+   *         queue is full or no BALANCE_RR subscriber can be selected; STATE_ERR: the
+   *         handle is invalid or belongs to another Topic.
+   *
+   * @note 除 STATE_ERR 外，每次返回时句柄都已交出或释放槽位，包括返回 FULL 时，此后
+   *       `data.Valid()` 为 false。返回 FULL 后重试须重新调用 CreateData() 并重新填写
+   *       数据；对同一句柄再次调用 Publish() 只会返回 STATE_ERR。
+   *       Except for STATE_ERR, the handle has handed over or released its slot on
+   *       every return, FULL included, and `data.Valid()` is false afterwards. A retry
+   *       after FULL calls CreateData() again and refills the payload; calling Publish()
+   *       again on the same handle only returns STATE_ERR.
    */
   ErrorCode Publish(SharedData& data) { return PublishData<false>(data); }
 

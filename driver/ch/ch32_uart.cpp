@@ -466,6 +466,7 @@ void CH32UART::StartTxDma(bool in_isr)
   dma_tx_channel_->CNTR = size;
   tx_busy_.Set();
   DMA_Cmd(dma_tx_channel_, ENABLE);
+  UNUSED(in_isr);
 }
 
 void CH32UART::HandleRxData(bool in_isr)

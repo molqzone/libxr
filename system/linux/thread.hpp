@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <climits>
 #include <cstring>
 
@@ -59,14 +60,15 @@ class Thread
    * 作为参数。栈大小取 `stack_depth` 与 `PTHREAD_STACK_MIN` 中的较大值。`SCHED_FIFO`
    * 的优先级范围足够时，线程使用 `SCHED_FIFO` 策略，优先级为最低优先级加 `priority`；
    * 范围不足或设置优先级失败时使用默认调度策略。
-   * 按这些属性创建失败时，改用默认属性重试一次。
+   * 按这些属性创建失败时，改用默认属性重试一次；进程内第一次重试时输出一条警告。
    *
    * This method creates a new thread using POSIX `pthread_create()`, executing `function`
    * with `arg` as the argument. The stack size is the larger of `stack_depth` and
    * `PTHREAD_STACK_MIN`. When the `SCHED_FIFO` priority range is large enough, the thread
    * uses `SCHED_FIFO` with the minimum priority plus `priority`; otherwise, or when
    * setting the priority fails, it uses the default policy. If creation with these
-   * attributes fails, it is retried once with default attributes.
+   * attributes fails, it is retried once with default attributes; the first such retry
+   * in the process logs a warning.
    */
   template <typename ArgType>
   void Create(ArgType arg, void (*function)(ArgType arg), const char* name,
@@ -119,8 +121,13 @@ class Thread
 
     if (ans != 0)
     {
-      XR_LOG_WARN("Failed to create thread: %s (%s), retrying with default attributes.",
-                  name, strerror(ans));
+      if (FirstDefaultAttributeRetry())
+      {
+        XR_LOG_WARN(
+            "Failed to create thread: %s (%s), retrying with default attributes. Later "
+            "threads that fail the same way retry without this warning.",
+            name, strerror(ans));
+      }
 
       // 完全使用系统默认属性（attr = nullptr）
       ans = pthread_create(&this->thread_handle_, nullptr, ThreadBlock::Port, block);
@@ -184,6 +191,18 @@ class Thread
   operator libxr_thread_handle() { return thread_handle_; }
 
  private:
+  /**
+   * @brief  记录进程内第一次改用默认属性重试 / Records the first retry with default
+   *         attributes in the process
+   * @return 第一次调用返回 true，之后返回 false /
+   *         true on the first call, false afterwards
+   */
+  static bool FirstDefaultAttributeRetry()
+  {
+    static std::atomic_flag retried = ATOMIC_FLAG_INIT;
+    return !retried.test_and_set(std::memory_order_relaxed);
+  }
+
   static void ConfigureAttributes(pthread_attr_t& attr, size_t stack_depth,
                                   Thread::Priority priority)
   {
