@@ -186,7 +186,7 @@ class STM32CANFD : public FDCAN
    *
    * @param hcan HAL FDCAN 句柄 / HAL FDCAN handle
    * @param queue_size 发送队列大小 / TX queue size
-   * @pre queue_size 必须大于 1。 queue_size must be greater than 1.
+   * @pre queue_size 必须大于 1 / queue_size must be greater than 1.
    */
   STM32CANFD(FDCAN_HandleTypeDef* hcan, uint32_t queue_size);
 

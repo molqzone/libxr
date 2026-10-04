@@ -32,12 +32,12 @@ class PID
    */
   struct Param
   {
-    Scalar k = 1.0;          ///< 全局比例因子 Global gain
-    Scalar p = 0.0;          ///< 比例项 Proportional gain
-    Scalar i = 0.0;          ///< 积分项 Integral gain
-    Scalar d = 0.0;          ///< 微分项 Derivative gain
-    Scalar i_limit = 0.0;    ///< 积分限幅 Integral limit
-    Scalar out_limit = 0.0;  ///< 输出限幅 Output limit
+    Scalar k = 1.0;          ///< 全局比例因子 / Global gain
+    Scalar p = 0.0;          ///< 比例项 / Proportional gain
+    Scalar i = 0.0;          ///< 积分项 / Integral gain
+    Scalar d = 0.0;          ///< 微分项 / Derivative gain
+    Scalar i_limit = 0.0;    ///< 积分限幅 / Integral limit
+    Scalar out_limit = 0.0;  ///< 输出限幅 / Output limit
     bool cycle = false;      ///< 是否处理周期误差 / Whether input is cyclic
   };
 
@@ -45,9 +45,8 @@ class PID
    * @brief 构造 PID 控制器。
    *        Construct a PID controller.
    *
-   * @tparam Param PID 参数结构体。
-   *                PID parameter struct.
-   * @param PARAM
+   * @tparam P 用于构造 Param 的参数类型 / Type used to construct Param
+   * @param p PID 参数 / PID parameters
    */
   template <typename P>
   PID(P&& p) : param_(std::forward<P>(p))
@@ -66,10 +65,10 @@ class PID
    *
    *        out = p * e_k + i * ∫(e_k)dt - d * fb_d_k + feed_forward
    *
-   * @param sp 期望值 Setpoint
-   * @param fb 反馈值 Feedback
+   * @param sp 期望值 / Setpoint
+   * @param fb 反馈值 / Feedback
    * @param dt 控制周期（秒） / Time step in seconds
-   * @return 控制器输出 Controller output
+   * @return 控制器输出 / Controller output
    */
   Scalar Calculate(Scalar sp, Scalar fb, Scalar dt)
   {
@@ -180,11 +179,11 @@ class PID
    *
    *        out = p * e_k + i * ∫(e_k)dt - d * fb_d_k + feed_forward
    *
-   * @param sp 期望值 Setpoint
-   * @param fb 反馈值 Feedback
+   * @param sp 期望值 / Setpoint
+   * @param fb 反馈值 / Feedback
    * @param fb_dot 反馈导数 / Feedback rate (d(fb)/dt)
-   * @param dt 控制周期 Delta time
-   * @return 控制器输出 Controller output
+   * @param dt 控制周期 / Delta time
+   * @return 控制器输出 / Controller output
    */
   Scalar Calculate(Scalar sp, Scalar fb, Scalar fb_dot, Scalar dt)
   {
@@ -300,11 +299,11 @@ class PID
   Scalar OutLimit() const { return param_.out_limit; }
   /// 获取上一次误差 / Get last error
   Scalar LastError() const { return last_err_; }
-  /// 获取上一次反馈值（未缩放）Get last feedback (raw)
+  /// 获取上一次反馈值（未缩放） / Get last feedback (raw)
   Scalar LastFeedback() const { return last_fb_; }
   /// 获取上一次输出 / Get last output
   Scalar LastOutput() const { return last_out_; }
-  /// 获取上一次导数（k * d(fb)/dt 或 k * fb_dot）Get last derivative (scaled by k)
+  /// 获取上一次导数（k * d(fb)/dt 或 k * fb_dot） / Get last derivative (scaled by k)
   Scalar LastDerivative() const { return last_der_; }
 
   /**
@@ -323,39 +322,39 @@ class PID
   /**
    * @brief 设置累计误差 / Set integral error
    *
-   * @param err 累计误差 Integral error
+   * @param err 累计误差 / Integral error
    */
   void SetIntegralError(Scalar err) { i_ = err; }
 
   /**
    * @brief 获取累计误差 / Get integral error
    *
-   * @return 累计误差 Integral error
+   * @return 累计误差 / Integral error
    */
   Scalar GetIntegralError() const { return i_; }
 
   /**
-   * @brief 设置前馈项 Set feedforward
+   * @brief 设置前馈项 / Set feedforward
    *
-   * @param feed_forward 前馈项 Feedforward
+   * @param feed_forward 前馈项 / Feedforward
    */
   void SetFeedForward(Scalar feed_forward) { feed_forward_ = feed_forward; }
 
   /**
-   * @brief 获取前馈项 Get feedforward
+   * @brief 获取前馈项 / Get feedforward
    *
-   * @return 前馈项 Feedforward
+   * @return 前馈项 / Feedforward
    */
   Scalar GetFeedForward() const { return feed_forward_; }
 
  private:
-  Param param_;              ///< PID 参数 PID parameter set
-  Scalar i_ = 0;             ///< 积分状态 Integral state
-  Scalar last_err_ = 0;      ///< 上次误差 Last error
-  Scalar last_fb_ = 0;       ///< 上次反馈（未缩放）Last feedback (raw)
-  Scalar last_der_ = 0;      ///< 上次导数（k 缩放）Last derivative (scaled by k)
-  Scalar last_out_ = 0;      ///< 上次输出 Last output
-  Scalar feed_forward_ = 0;  ///< 前馈项 Feedforward term
+  Param param_;              ///< PID 参数 / PID parameter set
+  Scalar i_ = 0;             ///< 积分状态 / Integral state
+  Scalar last_err_ = 0;      ///< 上次误差 / Last error
+  Scalar last_fb_ = 0;       ///< 上次反馈（未缩放） / Last feedback (raw)
+  Scalar last_der_ = 0;      ///< 上次导数（k 缩放） / Last derivative (scaled by k)
+  Scalar last_out_ = 0;      ///< 上次输出 / Last output
+  Scalar feed_forward_ = 0;  ///< 前馈项 / Feedforward term
 };
 
 }  // namespace LibXR

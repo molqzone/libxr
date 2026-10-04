@@ -153,10 +153,10 @@ class Format
     /**
      * @brief 判断另一组 C++ 参数类型是否与当前格式绑定时的参数列表完全一致 / Returns
      * whether another C++ argument list is exactly the one this format was built for.
-     * @tparam Actual Another C++ argument-type list to compare against. /
-     *         待比较的另一组 C++ 实参类型。
-     * @return Returns `true` when the type lists match exactly, otherwise
-     *         `false`. / 完全一致返回 `true`，否则返回 `false`。
+     * @tparam Actual 待比较的另一组 C++ 实参类型。
+     *         Another C++ argument-type list to compare against.
+     * @return 完全一致返回 `true`，否则返回 `false`。
+     *         Returns `true` when the type lists match exactly, otherwise `false`.
      */
     template <typename... Actual>
     [[nodiscard]] static consteval bool Matches()
@@ -169,8 +169,8 @@ class Format
   /**
    * @brief 返回当前源串会寻址的调用点参数个数 / Returns the required call-site argument
    * count addressed by this source.
-   * @return Returns the number of call-site arguments actually referenced by
-   *         this source. / 当前源串实际引用到的调用点参数个数。
+   * @return 当前源串实际引用到的调用点参数个数。
+   *         Returns the number of call-site arguments actually referenced by this source.
    */
   [[nodiscard]] static constexpr size_t ArgumentCount()
   {
@@ -180,9 +180,9 @@ class Format
   /**
    * @brief 判断这条源格式串能否和 `Args...` 一起通过编译 / Returns whether this source
    * string can be compiled with `Args...`.
-   * @tparam Args C++ argument types to test. / 待检查的 C++ 实参类型列表。
-   * @return Returns `true` when the source can compile with `Args...`,
-   *         otherwise `false`. / 可编译返回 `true`，否则返回 `false`。
+   * @tparam Args 待检查的 C++ 实参类型列表 / C++ argument types to test.
+   * @return 可编译返回 `true`，否则返回 `false`。
+   *         Returns `true` when the source can compile with `Args...`, otherwise `false`.
    */
   template <typename... Args>
   [[nodiscard]] static consteval bool Matches()

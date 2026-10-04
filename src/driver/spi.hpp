@@ -64,8 +64,8 @@ class SPI
 
   /**
    * @brief 将分频系数转换为除数 / Converts a prescaler to a divisor.
-   * @param prescaler 分频系数。Prescaler.
-   * @return 除数。Divisor.
+   * @param prescaler 分频系数 / Prescaler.
+   * @return 除数 / Divisor.
    */
   static constexpr uint32_t PrescalerToDiv(Prescaler prescaler)
   {
@@ -104,7 +104,7 @@ class SPI
   };
 
   /**
-   * @brief 构造函数。Constructor.
+   * @brief 构造函数 / Constructor.
    * @param rx_buffer 存储接收数据的缓冲区 / Buffer to store received data.
    * @param tx_buffer 存储发送数据的缓冲区 / Buffer to store data to be sent.
    */

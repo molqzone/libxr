@@ -38,8 +38,7 @@
 #include "transform.hpp"
 
 /**
- * @brief LibXR 命名空间
- * @brief LibXR namespace
+ * @brief LibXR 命名空间 / LibXR namespace
  */
 namespace LibXR
 {

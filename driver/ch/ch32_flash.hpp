@@ -21,6 +21,13 @@ class CH32Flash : public Flash
 {
  public:
   /**
+   * @brief 最小写入单位（字节，半字编程）；可直接作为 `DatabaseRaw` 的模板参数 /
+   *        Minimum write unit in bytes (half-word programming); usable directly as the
+   *        `DatabaseRaw` template argument
+   */
+  static constexpr size_t MIN_WRITE_SIZE = 2;
+
+  /**
    * @brief 构造闪存对象 / Construct flash object
    * @param regions 扇区表 / Sector table
    * @param region_count 扇区表的段数 / Number of runs in the sector table
@@ -43,13 +50,13 @@ class CH32Flash : public Flash
 
   static constexpr size_t MinWriteSize()
   {
-    return 2;
+    return MIN_WRITE_SIZE;
   }  ///< 最小写入粒度（半字） / Minimum write size (half-word)
 
   static constexpr uint32_t PageSize()
   {
     return 256;
-  }  ///< Page erase size in fast erase mode / 快速擦除页大小
+  }  ///< 快速擦除页大小 / Page erase size in fast erase mode
 
  private:
   const FlashRegion* regions_;

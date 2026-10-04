@@ -21,10 +21,10 @@ class Swd
    * @brief 传输策略（WAIT 重试与空闲周期插入）。
    * Transfer policy (WAIT retry & idle insertion).
    *
-   * - idle_cycles：每次传输尝试后插入（包括 WAIT 重试）。idle_cycles: inserted after EACH
-   * transfer attempt, including WAIT retries.
-   * - wait_retry：最大 WAIT 重试次数。wait_retry: maximum WAIT retries.
-   * - clear_sticky_on_fault：当 ACK==FAULT 时清除 sticky 错误。clear_sticky_on_fault:
+   * - idle_cycles：每次传输尝试后插入（包括 WAIT 重试） / idle_cycles: inserted after
+   * EACH transfer attempt, including WAIT retries.
+   * - wait_retry：最大 WAIT 重试次数 / wait_retry: maximum WAIT retries.
+   * - clear_sticky_on_fault：当 ACK==FAULT 时清除 sticky 错误 / clear_sticky_on_fault:
    * clear sticky errors when ACK==FAULT.
    */
   struct TransferPolicy
@@ -81,8 +81,8 @@ class Swd
 
   /**
    * @brief 执行一次 SWD 传输（不含重试） / Perform one SWD transfer (no retry).
-   * @param req 请求包。Request.
-   * @param resp 响应包。Response.
+   * @param req 请求包 / Request.
+   * @param resp 响应包 / Response.
    * @return ErrorCode 总线级错误码 / Bus-level error code.
    */
   virtual ErrorCode Transfer(const SwdProtocol::Request& req,
@@ -96,15 +96,15 @@ class Swd
    * @brief 带重试的 SWD 传输封装（WAIT 重试 + IdleCycles 插入）。
    *        SWD transfer wrapper with retry (WAIT retry + IdleCycles insertion).
    *
-   * 规则：Rules:
+   * 规则 / Rules:
    * - 每次传输尝试后均插入 idle_cycles（包括 WAIT 重试）。
    * Insert idle_cycles after EACH attempt (including WAIT retries).
    * - WAIT 最多重试 wait_retry 次 / Retry WAIT up to wait_retry times.
    * - 若 ACK==FAULT 且策略允许，则尝试清除 sticky 错误。
    * If ACK==FAULT and enabled, best-effort clear sticky errors.
    *
-   * @param req 请求包。Request.
-   * @param resp 响应包。Response.
+   * @param req 请求包 / Request.
+   * @param resp 响应包 / Response.
    * @return ErrorCode 操作结果（传输流程级） / Error code (flow-level).
    */
   ErrorCode TransferWithRetry(const SwdProtocol::Request& req,
@@ -261,10 +261,10 @@ class Swd
    * @brief AP 读事务（带重试，包含 RDBUFF 回读）。
    * AP read transaction (with retry, with RDBUFF readback).
    *
-   * 注意：AP 读为 posted；该辅助函数执行：Note: AP reads are posted; this helper
-   * performs: 1) AP READ（获得 posted 数据）。AP READ (gets posted data). 2) 读取 DP
+   * 注意：AP 读为 posted；该辅助函数执行：1) AP READ（获得 posted 数据）。2) 读取 DP
    * RDBUFF 获取本次 AP READ 的实际数据。
-   * DP RDBUFF read to obtain the actual data for this AP read.
+   * Note: AP reads are posted; this helper performs: 1) AP READ (gets posted data).
+   * 2) DP RDBUFF read to obtain the actual data for this AP read.
    *
    * @param addr2b AP 寄存器地址（A2/A3，两位） / AP register address (A2/A3, 2-bit).
    * @param val 输出：实际读取的数据 / Output: actual read value.
@@ -427,7 +427,7 @@ class Swd
 
  public:
   /**
-   * @brief 构造函数。Constructor.
+   * @brief 构造函数 / Constructor.
    */
   Swd() = default;
 

@@ -54,7 +54,7 @@ class SwdGeneralGPIO final : public Swd
 
  public:
   /**
-   * @brief 构造函数。Constructor.
+   * @brief 构造函数 / Constructor.
    * @param swclk 用作 SWCLK 的 GPIO / GPIO used as SWCLK.
    * @param swdio 用作 SWDIO 的 GPIO / GPIO used as SWDIO.
    * @param loops_per_us 每个 us 的循延时环次数 / Loops per us of delay.
@@ -239,10 +239,10 @@ class SwdGeneralGPIO final : public Swd
       const bool BIT = (((data_lsb_first[i / 8u] >> (i & 7u)) & 0x01u) != 0u);
       swdio_.Write(BIT);
 
-      // Match the DAP_Transfer request path: one bit owns one complete
-      // low-high clock cycle. Do not add an un-timed low pulse after every bit.
       // 匹配 DAP_Transfer 请求路径：每个 bit 只产生一个完整低-高时钟周期，
       // 不在每 bit 末尾额外插入无定时低脉冲。
+      // Match the DAP_Transfer request path: one bit owns one complete
+      // low-high clock cycle. Do not add an un-timed low pulse after every bit.
       GenOneClk();
     }
     swclk_.Write(false);
@@ -355,7 +355,7 @@ class SwdGeneralGPIO final : public Swd
    */
   enum class SwdioMode : uint8_t
   {
-    UNKNOWN = 0,  ///< 未知/未初始化。Unknown / uninitialized.
+    UNKNOWN = 0,  ///< 未知/未初始化 / Unknown / uninitialized.
     DRIVE,        ///< 输出驱动阶段 / Drive phase.
     SAMPLE_IN,    ///< 输入采样阶段 / Sample phase.
   };
@@ -383,10 +383,10 @@ class SwdGeneralGPIO final : public Swd
   {
     if (swdio_mode_ != SwdioMode::SAMPLE_IN)
     {
-      // Sampling should always leave SWDIO as a pulled-up input so the line has a
-      // defined idle level before the target actively drives ACK/data.
       // 采样阶段统一把 SWDIO 置为上拉输入，这样目标开始驱动 ACK/数据之前，
       // 总线空闲电平始终有明确定义。
+      // Sampling should always leave SWDIO as a pulled-up input so the line has a
+      // defined idle level before the target actively drives ACK/data.
       const ErrorCode EC =
           swdio_.SetConfig({SwdioGpioType::Direction::INPUT, SwdioGpioType::Pull::UP});
       if (EC != ErrorCode::OK)

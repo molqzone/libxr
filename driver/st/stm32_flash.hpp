@@ -36,6 +36,30 @@ inline uint32_t STM32FlashBankOf(uint32_t) { return FLASH_BANK_1; }
 inline uint32_t STM32FlashBankOf(uint32_t) { return 1; }
 #endif
 
+/**
+ * @brief 由 HAL 的 `FLASH_TYPEPROGRAM_*` 宏确定的最小写入单位（字节） / Minimum write
+ *        unit in bytes, determined from the HAL `FLASH_TYPEPROGRAM_*` macros
+ */
+// NOLINTNEXTLINE
+constexpr size_t STM32FlashMinWriteSize()
+{
+#ifdef FLASH_TYPEPROGRAM_BYTE
+  return 1;
+#elif defined(FLASH_TYPEPROGRAM_HALFWORD)
+  return 2;
+#elif defined(FLASH_TYPEPROGRAM_WORD)
+  return 4;
+#elif defined(FLASH_TYPEPROGRAM_DOUBLEWORD)
+  return 8;
+#elif defined(FLASH_TYPEPROGRAM_FLASHWORD)
+  return FLASH_NB_32BITWORD_IN_FLASHWORD * 4;
+#elif defined(FLASH_TYPEPROGRAM_QUADWORD)
+  return 16;
+#else
+#error "No supported FLASH_TYPEPROGRAM_xxx defined"
+#endif
+}
+
 #ifndef __DOXYGEN__
 
 template <typename, typename = void>
@@ -114,6 +138,14 @@ class STM32Flash : public Flash
 {
  public:
   /**
+   * @brief 最小写入单位（字节），由 HAL 的 `FLASH_TYPEPROGRAM_*` 宏确定；可直接作为
+   *        `DatabaseRaw` 的模板参数 / Minimum write unit in bytes, determined from the
+   *        HAL `FLASH_TYPEPROGRAM_*` macros; usable directly as the `DatabaseRaw`
+   *        template argument
+   */
+  static constexpr size_t MIN_WRITE_SIZE = STM32FlashMinWriteSize();
+
+  /**
    * @brief 构造闪存对象 / Construct flash object
    * @param regions 扇区表 / Sector table
    * @param region_count 扇区表的段数 / Number of runs in the sector table
@@ -155,25 +187,6 @@ class STM32Flash : public Flash
     return FLASH_TYPEPROGRAM_FLASHWORD;
 #elif defined(FLASH_TYPEPROGRAM_QUADWORD)
     return FLASH_TYPEPROGRAM_QUADWORD;
-#else
-#error "No supported FLASH_TYPEPROGRAM_xxx defined"
-#endif
-  }
-
-  static constexpr size_t DetermineMinWriteSize()
-  {
-#ifdef FLASH_TYPEPROGRAM_BYTE
-    return 1;
-#elif defined(FLASH_TYPEPROGRAM_HALFWORD)
-    return 2;
-#elif defined(FLASH_TYPEPROGRAM_WORD)
-    return 4;
-#elif defined(FLASH_TYPEPROGRAM_DOUBLEWORD)
-    return 8;
-#elif defined(FLASH_TYPEPROGRAM_FLASHWORD)
-    return FLASH_NB_32BITWORD_IN_FLASHWORD * 4;
-#elif defined(FLASH_TYPEPROGRAM_QUADWORD)
-    return 16;
 #else
 #error "No supported FLASH_TYPEPROGRAM_xxx defined"
 #endif

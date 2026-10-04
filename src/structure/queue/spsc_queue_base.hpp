@@ -173,9 +173,11 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    * @brief 按字节批量入队多个 payload / Enqueue multiple payloads by bytes
    * @param data 指向 payload 数组的字节指针 / Byte pointer to the payload array
    * @param count payload 个数 / Number of payloads
-   * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`
-   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::FULL` when
-   *         the queue is full
+   * @return 成功返回 `ErrorCode::OK`；队列满返回 `ErrorCode::FULL`；
+   *         `count` 不为 0 且 `data` 为空时返回 `ErrorCode::PTR_NULL`
+   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::FULL` when the queue
+   *         is full; returns `ErrorCode::PTR_NULL` when `data` is null and `count`
+   *         is not 0
    */
   ErrorCode PushBatchBytes(const void* data, size_t count)
   {
@@ -468,9 +470,11 @@ class alignas(LibXR::CONCURRENCY_ALIGNMENT) SPSCQueueBase
    *        / Peek multiple payloads by bytes without dequeuing them
    * @param data 用于接收 payload 的字节缓冲区 / Byte buffer receiving payloads
    * @param count payload 个数 / Number of payloads
-   * @return 成功返回 `ErrorCode::OK`；元素不足返回 `ErrorCode::EMPTY`
-   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when
-   *         there are not enough payloads available
+   * @return 成功返回 `ErrorCode::OK`；元素不足返回 `ErrorCode::EMPTY`；
+   *         `count` 不为 0 且 `data` 为空时返回 `ErrorCode::PTR_NULL`
+   *         Returns `ErrorCode::OK` on success; returns `ErrorCode::EMPTY` when there are
+   *         not enough payloads available; returns `ErrorCode::PTR_NULL` when `data` is
+   *         null and `count` is not 0
    */
   ErrorCode PeekBatchBytes(void* data, size_t count)
   {

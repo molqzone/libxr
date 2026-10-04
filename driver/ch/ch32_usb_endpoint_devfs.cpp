@@ -282,12 +282,12 @@ void CH32EndpointDevFs::ResetPMAAllocator()
 
 static inline uint16_t alloc_pma(size_t bytes)
 {
-  // Init may allocate endpoints before the first USB bus reset.
   // 首次 USB reset 前也可能分配端点，必须立即使用当前 CAN 预留后的上限。
+  // Init may allocate endpoints before the first USB bus reset.
   g_pma_limit = LibXR::CH32UsbCanShared::usb_pma_limit_bytes();
+  // PMA 最大只有 512 字节；先拒绝超大缓冲，避免对齐长度收窄到 uint16_t 时回绕。
   // PMA is at most 512 bytes. Reject before narrowing the aligned size to uint16_t,
   // so an oversized endpoint buffer cannot wrap the allocation increment.
-  // PMA 最大只有 512 字节；先拒绝超大缓冲，避免对齐长度收窄到 uint16_t 时回绕。
   REQUIRE(bytes <= g_pma_limit);
   if (bytes > g_pma_limit)
   {

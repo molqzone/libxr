@@ -14,7 +14,7 @@ namespace LibXR
 {
 /**
  * @brief 可作为对象池空闲索引队列的类型约束。
- * @brief Type constraint for free-index queues used by object pools.
+ *        Type constraint for free-index queues used by object pools.
  *
  * 该约束只要求队列提供最小的强类型接口：
  * - `ValueType`
@@ -40,8 +40,7 @@ concept PoolIndexQueue =
 
 /**
  * @class BasicObjectPool
- * @brief 基于空闲索引队列的 RAII 槽池。
- * @brief RAII slot pool backed by a free-index queue.
+ * @brief 基于空闲索引队列的 RAII 槽池 / RAII slot pool backed by a free-index queue.
  *
  * 该池使用一个索引队列管理空闲槽位；成功获取后返回 move-only `Handle`，其析构会
  * 自动把槽位索引归还到空闲队列。这样上层只依赖四类队列共享的最小 typed 接口。
@@ -72,7 +71,7 @@ class BasicObjectPool
   /**
    * @class Handle
    * @brief 对象池槽位的 move-only RAII 句柄。
-   * @brief Move-only RAII handle for one object-pool slot.
+   *        Move-only RAII handle for one object-pool slot.
    *
    * 句柄持有一个槽位索引及所属 pool 指针；析构时会自动把索引归还到空闲队列。
    * The handle stores one slot index plus its owning pool pointer, and returns
@@ -82,14 +81,13 @@ class BasicObjectPool
   {
    public:
     /**
-     * @brief 构造一个空 handle。
-     * @brief Construct an empty handle.
+     * @brief 构造一个空 handle / Construct an empty handle.
      */
     Handle() = default;
 
     /**
      * @brief 用指定 pool 和槽位索引构造 handle。
-     * @brief Construct a handle from the given pool and slot index.
+     *        Construct a handle from the given pool and slot index.
      * @param pool 所属对象池 / Owning object pool.
      * @param index 槽位索引 / Slot index.
      */
@@ -102,7 +100,7 @@ class BasicObjectPool
 
     /**
      * @brief 移动构造 handle，并转移槽位所有权。
-     * @brief Move-construct the handle and transfer slot ownership.
+     *        Move-construct the handle and transfer slot ownership.
      * @param other 被转移的源 handle / Source handle being moved from.
      */
     Handle(Handle&& other) noexcept
@@ -113,7 +111,7 @@ class BasicObjectPool
 
     /**
      * @brief 移动赋值 handle，并转移槽位所有权。
-     * @brief Move-assign the handle and transfer slot ownership.
+     *        Move-assign the handle and transfer slot ownership.
      * @param other 被转移的源 handle / Source handle being moved from.
      * @return 当前 handle 的引用 / Reference to this handle.
      */
@@ -132,13 +130,13 @@ class BasicObjectPool
 
     /**
      * @brief 析构 handle，并自动归还槽位。
-     * @brief Destroy the handle and return the slot automatically.
+     *        Destroy the handle and return the slot automatically.
      */
     ~Handle() { Reset(); }
 
     /**
      * @brief 判断当前 handle 是否持有有效槽位。
-     * @brief Return whether this handle currently owns a valid slot.
+     *        Return whether this handle currently owns a valid slot.
      * @return 持有有效槽位返回 `true`，否则返回 `false`。
      *         Returns `true` when this handle owns a valid slot, otherwise `false`.
      */
@@ -146,7 +144,7 @@ class BasicObjectPool
 
     /**
      * @brief 返回当前槽位对象的可写引用。
-     * @brief Return a writable reference to the current slot object.
+     *        Return a writable reference to the current slot object.
      * @return 当前槽位对象引用 / Reference to the current slot object.
      */
     [[nodiscard]] Data& Get()
@@ -157,7 +155,7 @@ class BasicObjectPool
 
     /**
      * @brief 返回当前槽位对象的只读引用。
-     * @brief Return a read-only reference to the current slot object.
+     *        Return a read-only reference to the current slot object.
      * @return 当前槽位对象常量引用 / Const reference to the current slot object.
      */
     [[nodiscard]] const Data& Get() const
@@ -167,36 +165,32 @@ class BasicObjectPool
     }
 
     /**
-     * @brief 以指针形式访问当前槽位对象。
-     * @brief Access the current slot object as a pointer.
+     * @brief 以指针形式访问当前槽位对象 / Access the current slot object as a pointer.
      * @return 指向当前槽位对象的指针 / Pointer to the current slot object.
      */
     [[nodiscard]] Data* operator->() { return &Get(); }
 
     /**
      * @brief 以只读指针形式访问当前槽位对象。
-     * @brief Access the current slot object as a const pointer.
+     *        Access the current slot object as a const pointer.
      * @return 指向当前槽位对象的只读指针 / Const pointer to the current slot object.
      */
     [[nodiscard]] const Data* operator->() const { return &Get(); }
 
     /**
-     * @brief 解引用当前槽位对象。
-     * @brief Dereference the current slot object.
+     * @brief 解引用当前槽位对象 / Dereference the current slot object.
      * @return 当前槽位对象引用 / Reference to the current slot object.
      */
     [[nodiscard]] Data& operator*() { return Get(); }
 
     /**
-     * @brief 只读解引用当前槽位对象。
-     * @brief Dereference the current slot object as const.
+     * @brief 只读解引用当前槽位对象 / Dereference the current slot object as const.
      * @return 当前槽位对象常量引用 / Const reference to the current slot object.
      */
     [[nodiscard]] const Data& operator*() const { return Get(); }
 
     /**
-     * @brief 返回当前持有的槽位索引。
-     * @brief Return the currently owned slot index.
+     * @brief 返回当前持有的槽位索引 / Return the currently owned slot index.
      * @return 当前槽位索引 / Current slot index.
      */
     [[nodiscard]] IndexType Index() const
@@ -207,7 +201,7 @@ class BasicObjectPool
 
     /**
      * @brief 主动归还当前槽位，并使 handle 失效。
-     * @brief Return the current slot explicitly and invalidate the handle.
+     *        Return the current slot explicitly and invalidate the handle.
      */
     void Reset()
     {
@@ -229,7 +223,7 @@ class BasicObjectPool
 
   /**
    * @brief 用内部 queue 和内部 slots 构造 pool。
-   * @brief Construct the pool with an internal queue and internal slots.
+   *        Construct the pool with an internal queue and internal slots.
    * @param slot_count 槽位数量 / Number of slots.
    */
   template <typename T = Data>
@@ -244,7 +238,7 @@ class BasicObjectPool
 
   /**
    * @brief 用内部 queue 和外部 slots 构造 pool。
-   * @brief Construct the pool with an internal queue and external slots.
+   *        Construct the pool with an internal queue and external slots.
    * @param slot_count 槽位数量 / Number of slots.
    * @param slots 外部槽数组 / Caller-provided slot storage.
    *
@@ -262,7 +256,7 @@ class BasicObjectPool
 
   /**
    * @brief 用外部 queue 和内部 slots 构造 pool。
-   * @brief Construct the pool with an external queue and internal slots.
+   *        Construct the pool with an external queue and internal slots.
    * @param free_queue 外部空闲索引队列 / Caller-provided free-index queue.
    * @param slot_count 槽位数量 / Number of slots.
    *
@@ -284,7 +278,7 @@ class BasicObjectPool
 
   /**
    * @brief 用外部 queue 和外部 slots 构造 pool。
-   * @brief Construct the pool with an external queue and external slots.
+   *        Construct the pool with an external queue and external slots.
    * @param free_queue 外部空闲索引队列 / Caller-provided free-index queue.
    * @param slot_count 槽位数量 / Number of slots.
    * @param slots 外部槽数组 / Caller-provided slot storage.
@@ -308,7 +302,7 @@ class BasicObjectPool
 
   /**
    * @brief 析构对象池，并释放其拥有的内部资源。
-   * @brief Destroy the object pool and release owned internal resources.
+   *        Destroy the object pool and release owned internal resources.
    */
   ~BasicObjectPool()
   {
@@ -335,8 +329,7 @@ class BasicObjectPool
   BasicObjectPool& operator=(BasicObjectPool&&) = delete;
 
   /**
-   * @brief 获取一个槽位 handle。
-   * @brief Acquire one slot handle.
+   * @brief 获取一个槽位 handle / Acquire one slot handle.
    * @param handle 用于接收成功获取的 handle / Handle receiving the acquired slot.
    * @return 成功返回 `ErrorCode::OK`，池空返回 `ErrorCode::EMPTY`。
    *         Returns `ErrorCode::OK` on success and `ErrorCode::EMPTY` when the pool is
@@ -360,21 +353,20 @@ class BasicObjectPool
 
   /**
    * @brief 返回当前仍可获取的空闲槽位数。
-   * @brief Return the number of currently acquirable free slots.
+   *        Return the number of currently acquirable free slots.
    * @return 当前空闲槽位数 / Current number of free slots.
    */
   [[nodiscard]] size_t EmptySize() const { return free_queue_->Size(); }
 
   /**
-   * @brief 返回对象池总槽位数。
-   * @brief Return the total number of slots in the pool.
+   * @brief 返回对象池总槽位数 / Return the total number of slots in the pool.
    * @return 槽位总数 / Total slot count.
    */
   [[nodiscard]] size_t Size() const { return slot_count_; }
 
   /**
    * @brief 通过槽位索引直接访问对象，不参与所有权检查。
-   * @brief Access an object by slot index without ownership checks.
+   *        Access an object by slot index without ownership checks.
    * @param index 槽位索引 / Slot index.
    * @return 对应槽位对象的引用 / Reference to the object stored in the slot.
    *
@@ -392,7 +384,7 @@ class BasicObjectPool
 
   /**
    * @brief 通过槽位索引只读直接访问对象，不参与所有权检查。
-   * @brief Access an object by slot index as const without ownership checks.
+   *        Access an object by slot index as const without ownership checks.
    * @param index 槽位索引 / Slot index.
    * @return 对应槽位对象的常量引用 / Const reference to the object stored in the slot.
    *
@@ -411,7 +403,7 @@ class BasicObjectPool
  private:
   /**
    * @brief 把指定槽位索引归还到空闲队列。
-   * @brief Return the given slot index back to the free queue.
+   *        Return the given slot index back to the free queue.
    * @param index 待归还的槽位索引 / Slot index to return.
    * @return 底层空闲队列返回的结果码 / Result code returned by the underlying free queue.
    */
@@ -423,7 +415,7 @@ class BasicObjectPool
 
   /**
    * @brief 在内部存储区里构造一个自拥有空闲队列。
-   * @brief Construct an owned free queue inside internal storage.
+   *        Construct an owned free queue inside internal storage.
    * @param slot_count 槽位数量，同时也是初始化时要压入的索引数量。
    *                   Slot count and thus the number of indices to preload.
    */
@@ -434,8 +426,7 @@ class BasicObjectPool
   }
 
   /**
-   * @brief 申请并拥有内部槽数组。
-   * @brief Allocate and own the internal slot storage.
+   * @brief 申请并拥有内部槽数组 / Allocate and own the internal slot storage.
    */
   void AllocateOwnedSlots()
   {
@@ -445,7 +436,7 @@ class BasicObjectPool
 
   /**
    * @brief 用 `0 .. slot_count - 1` 初始化空闲索引队列。
-   * @brief Initialize the free-index queue with `0 .. slot_count - 1`.
+   *        Initialize the free-index queue with `0 .. slot_count - 1`.
    */
   void InitializeFreeQueue()
   {
@@ -474,7 +465,7 @@ class BasicObjectPool
 
 /**
  * @brief 基于普通 FIFO 空闲索引队列的 RAII pool 别名。
- * @brief RAII pool alias backed by the ordinary FIFO free-index queue.
+ *        RAII pool alias backed by the ordinary FIFO free-index queue.
  * @tparam Data 槽内对象类型 / Slot object type.
  * @tparam IndexType 槽索引类型，默认 `uint32_t` / Slot index type, default `uint32_t`.
  */
@@ -483,7 +474,7 @@ using ObjectPool = BasicObjectPool<Data, Queue<IndexType>>;
 
 /**
  * @brief 基于 SPSC 空闲索引队列的 RAII pool 别名。
- * @brief RAII pool alias backed by the SPSC free-index queue.
+ *        RAII pool alias backed by the SPSC free-index queue.
  * @tparam Data 槽内对象类型 / Slot object type.
  * @tparam IndexType 槽索引类型，默认 `uint32_t` / Slot index type, default `uint32_t`.
  */
@@ -492,7 +483,7 @@ using SPSCObjectPool = BasicObjectPool<Data, SPSCQueue<IndexType>>;
 
 /**
  * @brief 基于 MPMC 空闲索引队列的 RAII pool 别名。
- * @brief RAII pool alias backed by the MPMC free-index queue.
+ *        RAII pool alias backed by the MPMC free-index queue.
  * @tparam Data 槽内对象类型 / Slot object type.
  * @tparam IndexType 槽索引类型，默认 `uint32_t` / Slot index type, default `uint32_t`.
  */

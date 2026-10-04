@@ -111,7 +111,7 @@ class CAN
   }
 
   /**
-   * @brief 构造函数。Constructor.
+   * @brief 构造函数 / Constructor.
    */
   CAN() = default;
 
@@ -248,7 +248,7 @@ class FDCAN : public CAN
 {
  public:
   /**
-   * @brief 构造函数。Constructor.
+   * @brief 构造函数 / Constructor.
    */
   FDCAN() = default;
 
@@ -297,7 +297,7 @@ class FDCAN : public CAN
    */
   struct DataBitTiming
   {
-    uint32_t brp = 0;         ///< 预分频。Prescaler.
+    uint32_t brp = 0;         ///< 预分频 / Prescaler.
     uint32_t prop_seg = 0;    ///< 传播段 / Propagation segment.
     uint32_t phase_seg1 = 0;  ///< 相位段 1 / Phase segment 1.
     uint32_t phase_seg2 = 0;  ///< 相位段 2 / Phase segment 2.

@@ -43,7 +43,7 @@ class JtagGeneralGPIO final : public Jtag
 
  public:
   /**
-   * @brief 构造函数。Constructor.
+   * @brief 构造函数 / Constructor.
    * @param tck 用作 TCK 的 GPIO / GPIO used as TCK.
    * @param tms 用作 TMS 的 GPIO / GPIO used as TMS.
    * @param tdi 用作 TDI 的 GPIO / GPIO used as TDI.

@@ -420,7 +420,7 @@ class EndPoint : public Object<Scalar>
       delta_theta_ = new Eigen::Matrix<Scalar, Eigen::Dynamic, 1>(joint_num_);
     }
 
-    /* Apply Limition */
+    /* Apply limits */
     Position<Scalar> target_pos = target_pos_;
     Quaternion<Scalar> target_quat = target_quat_;
     if (max_line_velocity_ > 0 && max_angular_velocity_ > 0)

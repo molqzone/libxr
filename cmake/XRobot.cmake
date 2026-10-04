@@ -26,7 +26,9 @@ if(XROBOT_MODULES_DIR)
     message(
       FATAL_ERROR
         "[XRobot] ${XROBOT_MODULES_DIR}/CMakeLists.txt is missing. "
-        "Run `xrobot setup` in ${_xr_bsp_root}."
+        "Run `xrobot setup` (xrobot 1.0 or newer) in ${_xr_bsp_root}. "
+        "A project without XRobot does not set XROBOT_MODULES_DIR; for an STM32CubeMX "
+        "project, `libxr stm32 setup` (libxr 6.0 or newer) removes it."
     )
   endif()
   include("${XROBOT_MODULES_DIR}/CMakeLists.txt")

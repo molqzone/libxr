@@ -3,13 +3,13 @@
 
 using namespace LibXR;
 
+// WCH GCC15 对当前已验证可用的 CH32V2/V3 自擦写路径代码形状很敏感。
+// 这里把擦除/写入热循环放到明确的 noinline 边界后面，
+// 但解锁、降频、清标志这些外围时序仍留在原来的调用点。
 // WCH GCC15 is sensitive to the exact self-programming code shape on the
 // currently validated CH32V2/V3 flash paths.
 // Keep the erase/write hot loops behind hard noinline boundaries, but leave the
 // surrounding unlock/clock/flag choreography in the original call sites.
-// WCH GCC15 对当前已验证可用的 CH32V2/V3 自擦写路径代码形状很敏感。
-// 这里把擦除/写入热循环放到明确的 noinline 边界后面，
-// 但解锁、降频、清标志这些外围时序仍留在原来的调用点。
 extern "C" LIBXR_NOINLINE ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
                                                           uint32_t end_addr,
                                                           const uint8_t* src);
@@ -269,12 +269,12 @@ extern "C" LIBXR_NOINLINE ErrorCode CH32FlashWriteHotPath(uint32_t start_addr,
     ec = write_page(aligned_begin, aligned_end, src + (aligned_begin - start_addr));
   }
 
-  // Tail begins after the already-consumed head/body segments.
-  // For single-page unaligned writes, `head_end` may already reach `end_addr`,
-  // so the tail must start from `head_end` instead of replaying the same span.
   // 尾段必须从已经消费完的 head/body 之后开始。
   // 对“同页内的非对齐小写入”，`head_end` 可能已经等于 `end_addr`，
   // 这里不能再从 `start_addr` 重放同一段。
+  // Tail begins after the already-consumed head/body segments.
+  // For single-page unaligned writes, `head_end` may already reach `end_addr`,
+  // so the tail must start from `head_end` instead of replaying the same span.
   const uint32_t tail_begin = has_full_pages ? aligned_end : head_end;
   if (ec == ErrorCode::OK && tail_begin < end_addr)
   {
@@ -294,14 +294,14 @@ bool CH32Flash::IsInRange(uint32_t addr, size_t size) const
 
 namespace
 {
+// 已验证的 CH32 flash 热路径机器码 blob 直接常驻 SRAM。
+// 这条 review 线当前的实测覆盖包含 CH32V2/V3 目标。
+// `.S` 仍保留在树里作为可读参考，运行时不再依赖重新汇编再 memcpy。
 // Verified CH32 flash hot-path machine code blob kept directly in SRAM.
 // The current validated coverage includes CH32V2/V3 targets exercised in this
 // review line.
 // `.S` remains in the tree as a readable source/reference for future toolchain
 // refreshes, but runtime no longer depends on reassembling and memcpy-ing it.
-// 已验证的 CH32 flash 热路径机器码 blob 直接常驻 SRAM。
-// 这条 review 线当前的实测覆盖包含 CH32V2/V3 目标。
-// `.S` 仍保留在树里作为可读参考，运行时不再依赖重新汇编再 memcpy。
 // clang-format off
 alignas(routine_align) static uint8_t g_ch32_flash_erase_hot[ch32_flash_erase_hot_path_size] = {
     0x63, 0x79, 0xb5, 0x04, 0x01, 0x76, 0x7d, 0x16, 0xb7, 0x26, 0x02, 0x40, 0x37, 0x08,

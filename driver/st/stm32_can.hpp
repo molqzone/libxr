@@ -46,7 +46,7 @@ class STM32CAN : public CAN
    *
    * @param hcan HAL CAN 句柄 / HAL CAN handle
    * @param queue_size 发送队列大小 / TX queue size
-   * @pre queue_size 必须大于 1。 queue_size must be greater than 1.
+   * @pre queue_size 必须大于 1 / queue_size must be greater than 1.
    */
   STM32CAN(CAN_HandleTypeDef* hcan, uint32_t queue_size);
 

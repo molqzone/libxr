@@ -73,8 +73,11 @@ class Semaphore
   /**
    * @brief  等待（减少）信号量
    *         Waits (decrements) the semaphore
-   * @param  timeout 超时时间（默认无限等待） / Timeout period (default is infinite wait)
-   * @return 操作结果 ErrorCode indicating success or timeout
+   * @param  timeout 超时时间（毫秒），默认 `UINT32_MAX` / Timeout in milliseconds,
+   *         default `UINT32_MAX`
+   * @return 获得信号量返回 `ErrorCode::OK`，超时返回 `ErrorCode::TIMEOUT`；
+   *         ThreadX 后端出错时返回 `ErrorCode::FAILED` / `ErrorCode::OK` when acquired,
+   *         `ErrorCode::TIMEOUT` on timeout; `ErrorCode::FAILED` on a ThreadX error
    *
    * @details
    * 该方法尝试减少信号量的值，表示线程正在占用一个资源。
@@ -101,7 +104,7 @@ class Semaphore
   size_t Value();
 
  private:
-  libxr_semaphore_handle semaphore_handle_;  ///< 信号量句柄 Semaphore handle
+  libxr_semaphore_handle semaphore_handle_;  ///< 信号量句柄 / Semaphore handle
 };
 
 }  // namespace LibXR

@@ -28,7 +28,7 @@ class CH32CAN : public CAN
    *
    * @param id CAN 实例编号 / CAN instance ID
    * @param queue_size 发送队列大小 / TX queue size (ClassicPack entries)
-   * @pre queue_size 必须大于 1。 queue_size must be greater than 1.
+   * @pre queue_size 必须大于 1 / queue_size must be greater than 1.
    */
   explicit CH32CAN(ch32_can_id_t id, uint32_t queue_size);
   ~CH32CAN() override = default;

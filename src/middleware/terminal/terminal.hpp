@@ -80,9 +80,9 @@ class Terminal
    */
   enum class Mode : uint8_t
   {
-    CRLF = 0,  ///< 回车换行 / Carriage Return + Line Feed (\r\n)
-    LF = 1,    ///< 仅换行 / Line Feed (\n)
-    CR = 2     ///< 仅回车 / Carriage Return (\r)
+    CRLF = 0,  ///< 回车换行 / Carriage Return + Line Feed (`\r\n`)
+    LF = 1,    ///< 仅换行 / Line Feed (`\n`)
+    CR = 2     ///< 仅回车 / Carriage Return (`\r`)
   };
 
   /**
@@ -150,14 +150,14 @@ class Terminal
   size_t request_read_size_ =
       0;  ///< 本轮计划读取的字节数 / Byte count requested for the current read attempt.
   RamFS::Dir* current_dir_;        ///< 当前目录 / Current directory
-  uint8_t flag_ansi_ = 0;          ///< ANSI 控制字符状态 ANSI control character state
+  uint8_t flag_ansi_ = 0;          ///< ANSI 控制字符状态 / ANSI control character state
   int offset_ = 0;                 ///< 光标偏移 / Cursor offset
   Stack<char> input_line_;         ///< 输入行缓冲区 / Input line buffer
   char* arg_tab_[MAX_ARG_NUMBER];  ///< 命令参数列表 / Command argument list
   size_t arg_number_ = 0;          ///< 参数数量 / Number of arguments
   Queue<HistoryLine> history_;     ///< 历史命令 / History of commands
   int history_index_ = -1;         ///< 当前历史索引 / Current history index
-  bool linefeed_flag_ = false;     ///< CRLF 抑制标志 CRLF suppression flag
+  bool linefeed_flag_ = false;     ///< CRLF 抑制标志 / CRLF suppression flag
   char linefeed_char_ = '\0';      ///< 上一个换行字符 / Previous line feed character
 
   /**

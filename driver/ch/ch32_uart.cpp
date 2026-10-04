@@ -568,7 +568,6 @@ void CH32UART::TxDmaIRQHandler()
 
 /**
  * @brief 清除接收 DMA 中断标志并通知后端 / Clear RX DMA flags and notify the backend.
- * @param id 串口编号 / UART identifier.
  */
 void CH32UART::RxDmaIRQHandler()
 {

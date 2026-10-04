@@ -19,9 +19,10 @@ class Watchdog
    *        Configuration for the watchdog
    *
    * @var Configuration::timeout_ms
-   *      看门狗溢出时间（毫秒）Overflow/reset time in milliseconds
+   *      看门狗溢出时间（毫秒） / Overflow/reset time in milliseconds
    * @var Configuration::feed_ms
-   *      自动喂狗周期（毫秒）Auto feed interval in milliseconds (should be < timeout_ms)
+   *      自动喂狗周期（毫秒）
+   *      Auto feed interval in milliseconds (should be < timeout_ms)
    */
   struct Configuration
   {
@@ -30,19 +31,19 @@ class Watchdog
   };
 
   /**
-   * @brief 构造函数 Constructor
+   * @brief 构造函数 / Constructor
    */
   Watchdog() {}
 
   /**
-   * @brief 虚析构函数 Virtual destructor
+   * @brief 虚析构函数 / Virtual destructor
    */
   virtual ~Watchdog() {}
 
   /**
    * @brief 初始化硬件并设置超时时间
    *        Initialize hardware and set overflow time
-   * @param config 配置参数 Configuration
+   * @param config 配置参数 / Configuration
    * @return 操作结果的错误码 / Error code of the operation
    */
   virtual ErrorCode SetConfig(const Configuration& config) = 0;

@@ -53,7 +53,7 @@ class Stack
     }
     else
     {
-      ASSERT(static_cast<int32_t>(depth_) + index >= 0);
+      ASSERT(static_cast<int32_t>(top_) + index >= 0);
       return stack_[top_ + index];
     }
   }
