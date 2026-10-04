@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="https://github.com/xrobot-org/LibXR_CppCodeGenerator/raw/main/imgs/XRobot.jpeg" width="300">
+<img src="https://github.com/xrobot-org/LibXR_CppCodeGenerator/raw/master/imgs/XRobot.jpeg" width="300">
 
 致力于成为最佳的嵌入式开发框架
 

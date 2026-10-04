@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="https://github.com/xrobot-org/LibXR_CppCodeGenerator/raw/main/imgs/XRobot.jpeg" width="300">
+<img src="https://github.com/xrobot-org/LibXR_CppCodeGenerator/raw/master/imgs/XRobot.jpeg" width="300">
 
 真正小巧、美观、超快且现代的嵌入式系统 USB 堆栈。
 

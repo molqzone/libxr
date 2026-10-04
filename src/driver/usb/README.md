@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="https://github.com/xrobot-org/LibXR_CppCodeGenerator/raw/main/imgs/XRobot.jpeg" width="300">
+<img src="https://github.com/xrobot-org/LibXR_CppCodeGenerator/raw/master/imgs/XRobot.jpeg" width="300">
 
 A truly tiny and beautiful, ultra-fast and modern USB stack for embedded systems.
 
