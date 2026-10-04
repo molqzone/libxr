@@ -148,6 +148,10 @@ void DisplayChar(char data)
       UpdateDisplayPosition();
     }
   }
+  else
+  {
+    line_truncated_ = true;
+  }
 }
 
 /**
@@ -222,6 +226,31 @@ void ShowHeader()
 }
 
 /**
+ * @brief  输出输入行被截断的提示
+ *         Prints the notice that the input line was truncated
+ *
+ * @note 提示写明保留的字符数，即模板参数 `MAX_LINE_SIZE`，随后换行。
+ *       The notice names the kept character count, the template parameter
+ *       `MAX_LINE_SIZE`, and ends with a line feed.
+ */
+void ShowTruncatedLineNotice()
+{
+  char digits[20];
+  size_t pos = sizeof(digits);
+  size_t value = MAX_LINE_SIZE;
+  do
+  {
+    digits[--pos] = static_cast<char>('0' + value % 10);
+    value /= 10;
+  } while (value != 0);
+
+  write_stream_ << ConstRawData("Line truncated to ")
+                << ConstRawData(&digits[pos], sizeof(digits) - pos)
+                << ConstRawData(" characters (MAX_LINE_SIZE).");
+  LineFeed();
+}
+
+/**
  * @brief  清除当前行
  *         Clears the current line
  */
@@ -258,9 +287,9 @@ void ShowHistory()
 }
 
 /**
- * @brief  将历史命令复制到输入行，并重置历史索引和光标偏移
- *         Copies the history command to the input line and resets history index and
- * cursor offset
+ * @brief  将历史命令复制到输入行，并重置历史索引、光标偏移和截断标记
+ *         Copies the history command to the input line and resets the history index,
+ *         the cursor offset and the truncation mark
  */
 void CopyHistoryToInputLine()
 {
@@ -273,6 +302,7 @@ void CopyHistoryToInputLine()
   input_line_[input_line_.Size()] = '\0';
   history_index_ = -1;
   offset_ = 0;
+  line_truncated_ = false;
 }
 
 /**

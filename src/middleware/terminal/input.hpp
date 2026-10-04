@@ -132,6 +132,11 @@ void HandleControlCharacter(char data)
         CopyHistoryToInputLine();
       }
       LineFeed();
+      if (line_truncated_)
+      {
+        ShowTruncatedLineNotice();
+        line_truncated_ = false;
+      }
       if (input_line_.Size() > 0)
       {
         ExecuteCommand();
