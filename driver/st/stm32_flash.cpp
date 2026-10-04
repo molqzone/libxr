@@ -122,7 +122,7 @@ uint32_t SecondToLastSector(const FlashRegion* regions, size_t region_count)
 
 STM32Flash::STM32Flash(const FlashRegion* regions, size_t region_count,
                        uint32_t start_address)
-    : Flash(SectorSizeAt(regions, region_count, start_address), DetermineMinWriteSize(),
+    : Flash(SectorSizeAt(regions, region_count, start_address), MIN_WRITE_SIZE,
             {reinterpret_cast<void*>(start_address),
              TableEnd(regions, region_count) - start_address}),
       regions_(regions),
@@ -244,7 +244,7 @@ ErrorCode STM32Flash::Write(size_t offset, ConstRawData data)
 
 #if defined(FLASH_TYPEPROGRAM_FLASHWORD) || defined(FLASH_TYPEPROGRAM_QUADWORD)
   alignas(LibXR::HW_CACHE_LINE_SIZE)
-      uint32_t flash_word_buffer[DetermineMinWriteSize() / sizeof(uint32_t)];
+      uint32_t flash_word_buffer[MIN_WRITE_SIZE / sizeof(uint32_t)];
   while (written < data.size_)
   {
     size_t chunk_size = LibXR::min<size_t>(MinWriteSize(), data.size_ - written);
