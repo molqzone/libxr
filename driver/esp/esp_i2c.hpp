@@ -85,7 +85,7 @@ class ESP32I2C : public I2C
                                   const uint8_t* write_prefix_payload,
                                   size_t write_prefix_size, const uint8_t* write_payload,
                                   size_t write_size, uint8_t* read_payload,
-                                 size_t read_size, ReadOperation& op, bool in_isr);
+                                  size_t read_size, ReadOperation& op, bool in_isr);
   ErrorCode KickAsyncTransaction();
   void FinishAsync(bool in_isr, ErrorCode ec);
   static bool IsValid7BitAddr(uint16_t addr);
