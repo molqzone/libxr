@@ -7,7 +7,7 @@
 #include "esp_err.h"
 #include "esp_private/sdmmc_common.h"
 #include "libxr_assert.hpp"
-#include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#include "sd_pwr_ctrl.h"
 
 namespace LibXR
 {
@@ -19,12 +19,12 @@ ESP32SDMMCHost::ESP32SDMMCHost(const Config& config) : config_(config)
   host_.slot = config.slot;
   host_.max_freq_khz = static_cast<int>(config.freq_khz);
 
-  if (config.ldo_chan_id >= 0)
-  {
-    sd_pwr_ctrl_ldo_config_t ldo_config = {};
-    ldo_config.ldo_chan_id = config.ldo_chan_id;
-    ASSERT(sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &host_.pwr_ctrl_handle) == ESP_OK);
-  }
+  // REQUIRE（见 Config::pwr_ctrl_handle）：卡槽供电由调用方创建并注入。
+  // P4 的 SD 槽默认经片上 LDO 供电，缺句柄时总线静默（卡表现为“无卡”），
+  // 软件无法区分缺电与空槽，故在此直接 fail-fast。
+  ASSERT(config.pwr_ctrl_handle != nullptr);
+
+  host_.pwr_ctrl_handle = config.pwr_ctrl_handle;
 
   ASSERT(sdmmc_host_init() == ESP_OK);
 

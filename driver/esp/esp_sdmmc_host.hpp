@@ -5,6 +5,7 @@
 
 #include "driver/sdmmc_host.h"
 #include "sd_host.hpp"
+#include "sd_pwr_ctrl.h"
 
 namespace LibXR
 {
@@ -45,9 +46,12 @@ class ESP32SDMMCHost : public SDHost
     int gpio_d3 = 42;           ///< D3 引脚 / D3 GPIO
     int gpio_cd = -1;           ///< 卡检测引脚，-1=禁用 / Card detect, -1=disabled
     uint32_t freq_khz = 20000;  ///< 目标频率（kHz）/ Target frequency
-    // ESP32-P4 的 SD 卡槽由片上 LDO 通道供电（Pico/EV 板为 LDO_VO4=4），
-    // 不配置则卡不上电、总线静默；外部供电的板子设为 -1。
-    int ldo_chan_id = 4;
+
+    // REQUIRE：卡槽供电由调用方负责，主机不创建任何供电硬件。
+    // P4 的 SD 槽经片上 LDO 供电（Pico 为 LDO_VO4，见
+    // sd_pwr_ctrl_by_on_chip_ldo.h）：开关供电的板子必须在构造本主机前
+    // 创建句柄并注入（板级事实归属板级代码），否则卡因缺电表现为“无卡”。
+    sd_pwr_ctrl_handle_t pwr_ctrl_handle = nullptr;
   };
 
   /**
