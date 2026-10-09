@@ -52,6 +52,8 @@ set(_libxr_idf_components
   esp_hal_timg
   esp_hal_wdt
   esp_hal_systimer
+  sdmmc
+  esp_driver_sdmmc
   esp_driver_uart
   esp_driver_spi
   esp_hw_support
