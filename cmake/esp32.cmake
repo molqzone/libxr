@@ -33,6 +33,14 @@ target_compile_options(xr
   esp_def.hpp
 )
 
+# IDF's own headers (e.g. hal/adc_ll.h on ESP32-P4) use designated initializers
+# that trip -Werror=missing-field-initializers under GCC >= 15. Keep them
+# non-fatal instead of weakening the project-wide -Werror policy.
+target_compile_options(xr
+  PRIVATE
+  -Wno-error=missing-field-initializers
+)
+
 # Prefer official ESP-IDF component targets so headers/libs are managed by IDF.
 set(_libxr_idf_components
   freertos
@@ -43,6 +51,7 @@ set(_libxr_idf_components
   esp_hal_gpspi
   esp_hal_timg
   esp_hal_wdt
+  esp_hal_systimer
   esp_driver_uart
   esp_driver_spi
   esp_hw_support

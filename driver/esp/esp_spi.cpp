@@ -337,22 +337,21 @@ ErrorCode ESP32SPI::InitDmaBackend()
     return ErrorCode::OK;
   }
 
-  spi_dma_ctx_t* ctx = nullptr;
-  if (spicommon_dma_chan_alloc(host_, SPI_DMA_CH_AUTO, &ctx) != ESP_OK)
-  {
-    return ErrorCode::INIT_ERR;
-  }
-
   const size_t cfg_max_size = std::max(dma_rx_raw_.size_, dma_tx_raw_.size_);
   int actual_max_size = 0;
-  if (spicommon_dma_desc_alloc(ctx, static_cast<int>(cfg_max_size), &actual_max_size) !=
-      ESP_OK)
+  if (spicommon_dma_chan_alloc(host_, SPI_DMA_CH_AUTO, 0) != ESP_OK)
   {
-    (void)spicommon_dma_chan_free(ctx);
     return ErrorCode::INIT_ERR;
   }
 
-  dma_ctx_ = ctx;
+  if (spicommon_dma_desc_alloc(host_, static_cast<int>(cfg_max_size), &actual_max_size) !=
+      ESP_OK)
+  {
+    (void)spicommon_dma_chan_free(host_);
+    return ErrorCode::INIT_ERR;
+  }
+
+  dma_ctx_ = spi_bus_get_dma_ctx(host_);
   dma_enabled_ = true;
   dma_max_transfer_bytes_ =
       std::min<size_t>({static_cast<size_t>(actual_max_size), dma_rx_raw_.size_,
