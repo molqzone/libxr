@@ -58,6 +58,12 @@ class ESP32SDMMCCard
   bool Present() const { return present_; }
 
   /**
+   * @brief 枚举失败时的原始 esp_err_t（0=成功）。
+   *        Raw esp_err_t from enumeration (0 on success).
+   */
+  int GetInitError() const { return static_cast<int>(init_error_); }
+
+  /**
    * @brief 获取卡片信息（未在位时内容为零）/ Get card info (zeroed if absent).
    */
   const Info& GetInfo() const { return info_; }
@@ -102,6 +108,7 @@ class ESP32SDMMCCard
   sdmmc_card_t card_ = {};
   Info info_;
   bool present_ = false;
+  esp_err_t init_error_ = ESP_OK;
 };
 
 }  // namespace LibXR

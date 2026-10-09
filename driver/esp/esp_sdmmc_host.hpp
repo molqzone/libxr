@@ -45,6 +45,9 @@ class ESP32SDMMCHost : public SDHost
     int gpio_d3 = 42;           ///< D3 引脚 / D3 GPIO
     int gpio_cd = -1;           ///< 卡检测引脚，-1=禁用 / Card detect, -1=disabled
     uint32_t freq_khz = 20000;  ///< 目标频率（kHz）/ Target frequency
+    // ESP32-P4 的 SD 卡槽由片上 LDO 通道供电（Pico/EV 板为 LDO_VO4=4），
+    // 不配置则卡不上电、总线静默；外部供电的板子设为 -1。
+    int ldo_chan_id = 4;
   };
 
   /**

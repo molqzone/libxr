@@ -9,13 +9,16 @@ namespace LibXR
 
 ESP32SDMMCCard::ESP32SDMMCCard(ESP32SDMMCHost& host) : host_(host)
 {
-  if (sdmmc_card_init(host_.GetIdfHost(), &card_) != ESP_OK)
+  const esp_err_t init_err = sdmmc_card_init(host_.GetIdfHost(), &card_);
+  if (init_err != ESP_OK)
   {
     // 空槽/无响应：可移动介质，不 fail-fast。
     present_ = false;
+    init_error_ = init_err;
     return;
   }
   present_ = true;
+  init_error_ = ESP_OK;
 
   info_.mfg_id = static_cast<uint8_t>(card_.cid.mfg_id);
   std::memcpy(info_.product_name, card_.cid.name, 5);

@@ -1,9 +1,13 @@
 #include "esp_sdmmc_host.hpp"
 
+#include <cstring>
+
 #include "driver/gpio.h"
 #include "driver/sdmmc_default_configs.h"
 #include "esp_err.h"
+#include "esp_private/sdmmc_common.h"
 #include "libxr_assert.hpp"
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
 
 namespace LibXR
 {
@@ -15,9 +19,18 @@ ESP32SDMMCHost::ESP32SDMMCHost(const Config& config) : config_(config)
   host_.slot = config.slot;
   host_.max_freq_khz = static_cast<int>(config.freq_khz);
 
+  if (config.ldo_chan_id >= 0)
+  {
+    sd_pwr_ctrl_ldo_config_t ldo_config = {};
+    ldo_config.ldo_chan_id = config.ldo_chan_id;
+    ASSERT(sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &host_.pwr_ctrl_handle) == ESP_OK);
+  }
+
   ASSERT(sdmmc_host_init() == ESP_OK);
 
   sdmmc_slot_config_t slot_config = sdmmc_slot_config_t SDMMC_SLOT_CONFIG_DEFAULT();
+  // 显式 4-bit：默认的“最大可能宽度”在 P4 上会解析为 8-bit，而板上只接 D0-D3。
+  slot_config.width = 4;
   slot_config.clk = static_cast<gpio_num_t>(config.gpio_clk);
   slot_config.cmd = static_cast<gpio_num_t>(config.gpio_cmd);
   slot_config.d0 = static_cast<gpio_num_t>(config.gpio_d0);
@@ -111,6 +124,10 @@ ErrorCode ESP32SDMMCHost::Transaction(Command& cmd, Data* data)
     idf_cmd.blklen = data->block_size;
   }
 
+  // IDF 主机要求非零超时（协议层自己也会兜底为 1000ms）；写命令放宽到 5s。
+  idf_cmd.timeout_ms = (data != nullptr && !data->read) ? SDMMC_WRITE_CMD_TIMEOUT_MS
+                                                        : SDMMC_DEFAULT_CMD_TIMEOUT_MS;
+
   const esp_err_t err = sdmmc_host_do_transaction(host_.slot, &idf_cmd);
   if (err == ESP_ERR_TIMEOUT)
   {
@@ -121,10 +138,18 @@ ErrorCode ESP32SDMMCHost::Transaction(Command& cmd, Data* data)
     return ErrorCode::FAILED;
   }
 
-  for (size_t i = 0; i < 4; ++i)
+  // v6.1 host 把卡级错误（响应超时/CRC 错等）写在 cmd.error，返回值只表示
+  // 事务流程是否走完；协议层同样以 cmd->error 为准。
+  if (idf_cmd.error == ESP_ERR_TIMEOUT)
   {
-    cmd.response[i] = idf_cmd.response[i];
+    return ErrorCode::TIMEOUT;
   }
+  if (idf_cmd.error != ESP_OK)
+  {
+    return ErrorCode::FAILED;
+  }
+
+  std::memcpy(cmd.response, &idf_cmd.response, sizeof(cmd.response));
   return ErrorCode::OK;
 }
 
