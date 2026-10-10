@@ -135,6 +135,20 @@ constexpr ObjectDataType ObjectDataTypeOf()
   }
 }
 
+template <typename Value>
+constexpr uint16_t ObjectBitLengthOf()
+{
+  using Type = std::remove_cv_t<Value>;
+  if constexpr (std::is_same_v<Type, bool>)
+  {
+    return 1U;
+  }
+  else
+  {
+    return static_cast<uint16_t>(sizeof(Type) * 8U);
+  }
+}
+
 struct ObjectEntry
 {
   ObjectAddress address{};

@@ -8,6 +8,7 @@ namespace LibXR::EtherCAT
 
 class DeviceBuilder;
 class DeviceComposition;
+class EscPort;
 
 /**
  * One functional contribution to an EtherCAT slave.
@@ -52,6 +53,13 @@ class DeviceClass
     (void)entry;
     return ErrorCode::OK;
   }
+
+  /**
+   * Bind the completed device's ESC transport during core construction.
+   * Most classes do not need the transport; services such as EEPROM DFU can
+   * override this hook when they are constructed before the board ESC.
+   */
+  virtual void OnEscPortReady(EscPort& port) { (void)port; }
 
  private:
   friend class DeviceComposition;

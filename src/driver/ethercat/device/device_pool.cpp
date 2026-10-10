@@ -5,11 +5,11 @@ namespace LibXR::EtherCAT
 
 DevicePool::DevicePool(const Storage& storage) : storage_(storage)
 {
-  ASSERT(storage_.classes != nullptr && storage_.class_capacity > 0);
-  ASSERT(storage_.objects != nullptr && storage_.object_capacity > 0);
-  ASSERT(storage_.entries != nullptr && storage_.entry_capacity > 0);
-  ASSERT(storage_.pdos != nullptr && storage_.pdo_capacity > 0);
-  ASSERT(storage_.pdo_entries != nullptr && storage_.pdo_entry_capacity > 0);
+  REQUIRE(storage_.classes != nullptr && storage_.class_capacity > 0);
+  REQUIRE(storage_.objects != nullptr && storage_.object_capacity > 0);
+  REQUIRE(storage_.entries != nullptr && storage_.entry_capacity > 0);
+  REQUIRE(storage_.pdos != nullptr && storage_.pdo_capacity > 0);
+  REQUIRE(storage_.pdo_entries != nullptr && storage_.pdo_entry_capacity > 0);
 }
 
 bool DevicePool::Empty() const
@@ -20,31 +20,31 @@ bool DevicePool::Empty() const
 
 void DevicePool::AddClass(DeviceClass& device)
 {
-  ASSERT(class_count_ < storage_.class_capacity);
+  REQUIRE(class_count_ < storage_.class_capacity);
   storage_.classes[class_count_++] = &device;
 }
 
 Object& DevicePool::AddObject()
 {
-  ASSERT(object_count_ < storage_.object_capacity);
+  REQUIRE(object_count_ < storage_.object_capacity);
   return storage_.objects[object_count_++];
 }
 
 ObjectEntry& DevicePool::AddEntry()
 {
-  ASSERT(entry_count_ < storage_.entry_capacity);
+  REQUIRE(entry_count_ < storage_.entry_capacity);
   return storage_.entries[entry_count_++];
 }
 
 Pdo& DevicePool::AddPdo()
 {
-  ASSERT(pdo_count_ < storage_.pdo_capacity);
+  REQUIRE(pdo_count_ < storage_.pdo_capacity);
   return storage_.pdos[pdo_count_++];
 }
 
 PdoEntry& DevicePool::AddPdoEntry()
 {
-  ASSERT(pdo_entry_count_ < storage_.pdo_entry_capacity);
+  REQUIRE(pdo_entry_count_ < storage_.pdo_entry_capacity);
   return storage_.pdo_entries[pdo_entry_count_++];
 }
 

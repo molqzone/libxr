@@ -24,7 +24,7 @@ class DeviceBuilder
                         const char* name, Value& value)
   {
     return AddEntry(object, subindex, ObjectDataTypeOf<Value>(),
-                    static_cast<uint16_t>(sizeof(Value) * 8U), access, name,
+                    ObjectBitLengthOf<Value>(), access, name,
                     RawData(value));
   }
 
@@ -68,6 +68,9 @@ class DeviceComposition
 
  private:
   friend class DeviceCore;
+
+  /** Bind the concrete ESC transport once while DeviceCore is constructed. */
+  void BindEscPort(EscPort& port);
 
   void DispatchStateChanged(bool in_isr, AlState from, AlState to);
   void DispatchOutputsUpdated(bool in_isr);

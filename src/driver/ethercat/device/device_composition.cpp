@@ -47,11 +47,11 @@ void CopyBitsFromProcessData(uint8_t* destination, const uint8_t* source,
 
 Object& DeviceBuilder::AddObject(uint16_t index, ObjectCode code, const char* name)
 {
-  ASSERT(name != nullptr);
+  REQUIRE(name != nullptr);
 
   for (size_t object_index = 0; object_index < pool_.object_count_; ++object_index)
   {
-    ASSERT(pool_.storage_.objects[object_index].index != index);
+    REQUIRE(pool_.storage_.objects[object_index].index != index);
   }
 
   Object& object = pool_.AddObject();
@@ -66,21 +66,21 @@ ObjectEntry& DeviceBuilder::AddEntry(Object& object, uint8_t subindex,
                                      ObjectAccess access, const char* name,
                                      RawData storage)
 {
-  ASSERT(&object == open_object_);
-  ASSERT(object.owner == &owner_);
-  ASSERT(name != nullptr);
-  ASSERT(bit_length > 0);
-  ASSERT(storage.addr_ != nullptr || storage.size_ == 0);
-  ASSERT(storage.size_ == 0 || storage.size_ * 8U >= bit_length);
+  REQUIRE(&object == open_object_);
+  REQUIRE(object.owner == &owner_);
+  REQUIRE(name != nullptr);
+  REQUIRE(bit_length > 0);
+  REQUIRE(storage.addr_ != nullptr || storage.size_ == 0);
+  REQUIRE(storage.size_ == 0 || storage.size_ * 8U >= bit_length);
 
   for (size_t entry_index = 0; entry_index < object.entry_count; ++entry_index)
   {
-    ASSERT(object.entries[entry_index].address.subindex != subindex);
+    REQUIRE(object.entries[entry_index].address.subindex != subindex);
   }
 
   if (object.entries == nullptr)
   {
-    ASSERT(pool_.entry_count_ < pool_.storage_.entry_capacity);
+    REQUIRE(pool_.entry_count_ < pool_.storage_.entry_capacity);
     object.entries = &pool_.storage_.entries[pool_.entry_count_];
   }
 
@@ -94,7 +94,7 @@ Pdo& DeviceBuilder::AddPdo(PdoDirection direction, uint16_t index)
 {
   for (size_t pdo_index = 0; pdo_index < pool_.pdo_count_; ++pdo_index)
   {
-    ASSERT(pool_.storage_.pdos[pdo_index].index != index);
+    REQUIRE(pool_.storage_.pdos[pdo_index].index != index);
   }
 
   Pdo& pdo = pool_.AddPdo();
@@ -106,21 +106,21 @@ Pdo& DeviceBuilder::AddPdo(PdoDirection direction, uint16_t index)
 
 PdoEntry& DeviceBuilder::Map(Pdo& pdo, ObjectEntry& entry)
 {
-  ASSERT(&pdo == open_pdo_);
-  ASSERT(pdo.owner == &owner_);
-  ASSERT(entry.owner == &owner_);
+  REQUIRE(&pdo == open_pdo_);
+  REQUIRE(pdo.owner == &owner_);
+  REQUIRE(entry.owner == &owner_);
 
   const ObjectAccess required_access =
       (pdo.direction == PdoDirection::RX) ? ObjectAccess::RX_PDO : ObjectAccess::TX_PDO;
-  ASSERT(HasAccess(entry.access, required_access));
+  REQUIRE(HasAccess(entry.access, required_access));
 
   const uint32_t next_bit_length =
       static_cast<uint32_t>(pdo.bit_length) + entry.bit_length;
-  ASSERT(next_bit_length <= std::numeric_limits<uint16_t>::max());
+  REQUIRE(next_bit_length <= std::numeric_limits<uint16_t>::max());
 
   if (pdo.entries == nullptr)
   {
-    ASSERT(pool_.pdo_entry_count_ < pool_.storage_.pdo_entry_capacity);
+    REQUIRE(pool_.pdo_entry_count_ < pool_.storage_.pdo_entry_capacity);
     pdo.entries = &pool_.storage_.pdo_entries[pool_.pdo_entry_count_];
   }
 
@@ -135,11 +135,11 @@ DeviceComposition::DeviceComposition(DevicePool& pool,
                                      std::span<DeviceClass* const> classes)
     : pool_(pool)
 {
-  ASSERT(pool_.Empty());
+  REQUIRE(pool_.Empty());
 
   for (DeviceClass* device_class : classes)
   {
-    ASSERT(device_class != nullptr);
+    REQUIRE(device_class != nullptr);
     pool_.AddClass(*device_class);
   }
 
@@ -151,6 +151,14 @@ DeviceComposition::DeviceComposition(DevicePool& pool,
   }
 
   dictionary_ = ObjectDictionary(pool_.storage_.objects, pool_.object_count_);
+}
+
+void DeviceComposition::BindEscPort(EscPort& port)
+{
+  for (size_t class_index = 0; class_index < pool_.class_count_; ++class_index)
+  {
+    pool_.storage_.classes[class_index]->OnEscPortReady(port);
+  }
 }
 
 DeviceComposition::DeviceComposition(DevicePool& pool,
