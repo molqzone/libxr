@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "block_device.hpp"
 #include "esp_def.hpp"
 #include "esp_sdmmc_host.hpp"
 #include "libxr_type.hpp"
@@ -22,7 +23,7 @@ namespace LibXR
  * M1 enumerates via the IDF protocol layer; card info is stored in a
  * LibXR-owned struct. An empty slot is not a hard failure.
  */
-class ESP32SDMMCCard
+class ESP32SDMMCCard : public BlockDevice
 {
  public:
   /**
@@ -62,6 +63,48 @@ class ESP32SDMMCCard
    *        Raw esp_err_t from enumeration (0 on success).
    */
   int GetInitError() const { return static_cast<int>(init_error_); }
+
+  // ---- BlockDevice 实现：卡片即块设备（参照 ESP32SPI : public SPI）----
+
+  [[nodiscard]] uint32_t SectorSize() const override { return info_.sector_size; }
+
+  [[nodiscard]] uint64_t SectorCount() const override
+  {
+    return info_.capacity_bytes / info_.sector_size;
+  }
+
+  ErrorCode Read(uint64_t lba, uint32_t count, RawData buf) override
+  {
+    if (lba > 0xFFFFFFFFull)  // SD 规范 LBA 为 32 位；容量天然保证
+    {
+      return ErrorCode::ARG_ERR;
+    }
+    return ReadSectors(static_cast<uint32_t>(lba), count, buf);
+  }
+
+  ErrorCode Write(uint64_t lba, uint32_t count, ConstRawData buf) override
+  {
+    if (lba > 0xFFFFFFFFull)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+    return WriteSectors(static_cast<uint32_t>(lba), count, buf);
+  }
+
+  ErrorCode Trim(uint64_t lba, uint32_t count) override
+  {
+    if (!CanDiscard())  // 无 discard 能力时不假装支持
+    {
+      return ErrorCode::NOT_SUPPORT;
+    }
+    if (lba > 0xFFFFFFFFull)
+    {
+      return ErrorCode::ARG_ERR;
+    }
+    return EraseSectors(static_cast<uint32_t>(lba), count);
+  }
+
+  ErrorCode Sync() override { return ErrorCode::OK; }  // SD 无设备侧缓存
 
   /**
    * @brief 获取卡片信息（未在位时内容为零）/ Get card info (zeroed if absent).

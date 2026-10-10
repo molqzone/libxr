@@ -105,6 +105,7 @@ add_executable(
   middleware/message/topic/test_runtime.cpp
   middleware/message/topic/test_topic.cpp
   middleware/ramfs/ramfs/test_ramfs.cpp
+  middleware/fat/fat/test_fat.cpp
   middleware/terminal/command/test_command.cpp
   middleware/terminal/display/test_display.cpp
   middleware/terminal/input/test_input.cpp

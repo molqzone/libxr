@@ -46,6 +46,7 @@ void test_spsc_prefix();
 void test_serialized_service();
 void test_rbt();
 void test_ramfs();
+void test_fat();
 void test_semaphore();
 void test_mutex();
 void test_stack();
@@ -248,6 +249,7 @@ constexpr GroupedTestCase kMainTestCases[] = {
     {"control_tests", {"pid", &RunVoidEntry<test_pid>, false}},
 
     {"system_tests", {"ramfs", &RunVoidEntry<test_ramfs>, false}},
+    {"system_tests", {"fat", &RunVoidEntry<test_fat>, false}},
     {"system_tests", {"event", &RunVoidEntry<test_event>, false}},
     {"system_tests", {"message_topic", &RunVoidEntry<test_message_topic>, false}},
     {"system_tests",
