@@ -1263,6 +1263,14 @@ ErrorCode Fat::CreateFile(const char* path, FatDirEntry& entry_out)
   short_entry.clus_hi = 0;
   short_entry.clus_lo = 0;
   short_entry.size = 0;
+  // 时间戳：板上无 RTC，写 FAT 纪元 1980-01-01 00:00:00（date=0x0021）。
+  // No RTC on board: stamp the FAT epoch 1980-01-01 00:00:00 (date 0x0021).
+  short_entry.crt_time_10 = 0;
+  short_entry.crt_time = 0;
+  short_entry.crt_date = 0x0021;
+  short_entry.acc_date = 0x0021;
+  short_entry.wrt_time = 0;
+  short_entry.wrt_date = 0x0021;
   rc = writer.WriteAt(slot, &short_entry);
   if (rc != ErrorCode::OK)
   {
