@@ -11,6 +11,7 @@ target_sources(
           "${CMAKE_CURRENT_LIST_DIR}/device/device_pool.cpp"
           "${CMAKE_CURRENT_LIST_DIR}/device/device_composition.cpp"
           "${CMAKE_CURRENT_LIST_DIR}/device/device_core.cpp"
+          "${CMAKE_CURRENT_LIST_DIR}/device/coe/coe_protocol.cpp"
 )
 
 option(XRECAT_TEST_BUILD "Build XRECAT host protocol tests" OFF)

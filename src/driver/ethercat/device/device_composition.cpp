@@ -263,7 +263,7 @@ ErrorCode DeviceComposition::PackPdos(bool in_isr, RawData process_data)
     for (size_t entry_index = 0; entry_index < pdo.entry_count; ++entry_index)
     {
       const PdoEntry& pdo_entry = pdo.entries[entry_index];
-      ObjectEntry& entry = *pdo_entry.object;
+      const ObjectEntry& entry = *pdo_entry.object;
       if (entry.storage.addr_ == nullptr ||
           entry.storage.size_ < BytesForBits(entry.bit_length))
       {
@@ -310,7 +310,7 @@ ErrorCode DeviceComposition::UnpackPdos(bool in_isr, ConstRawData process_data)
     for (size_t entry_index = 0; entry_index < pdo.entry_count; ++entry_index)
     {
       const PdoEntry& pdo_entry = pdo.entries[entry_index];
-      ObjectEntry& entry = *pdo_entry.object;
+      const ObjectEntry& entry = *pdo_entry.object;
       if (entry.storage.addr_ == nullptr ||
           entry.storage.size_ < BytesForBits(entry.bit_length))
       {

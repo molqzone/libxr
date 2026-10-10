@@ -16,7 +16,7 @@ enum class PdoDirection : uint8_t
 
 struct PdoEntry
 {
-  ObjectEntry* object = nullptr;
+  const ObjectEntry* object = nullptr;
   uint16_t bit_offset = 0;
 };
 
@@ -24,7 +24,7 @@ struct Pdo
 {
   uint16_t index = 0;
   PdoDirection direction = PdoDirection::RX;
-  PdoEntry* entries = nullptr;
+  const PdoEntry* entries = nullptr;
   size_t entry_count = 0;
   uint16_t bit_length = 0;
   DeviceClass* owner = nullptr;

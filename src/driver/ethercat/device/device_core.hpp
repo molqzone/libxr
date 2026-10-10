@@ -8,7 +8,9 @@
 
 #include "core/esc_port.hpp"
 #include "core/esc_registers.hpp"
+#include "core/mailbox.hpp"
 #include "device_composition.hpp"
+#include "ethercat/device/coe/coe_protocol.hpp"
 
 namespace LibXR::EtherCAT
 {
@@ -18,14 +20,30 @@ namespace LibXR::EtherCAT
  *
  * DeviceCore owns the completed DeviceComposition in the same sense that USB
  * DeviceCore owns DeviceComposition. It never owns DeviceClass modules or the
- * concrete ESC driver. All protocol work is driven from ESC IRQ events; no
- * background polling path is required.
+ * concrete ESC driver. Protocol work is entered from two directions: the ESC
+ * event path (HandleAlevent/HandleEvent, what an interrupt-driven board driver
+ * uses) and the Poll* entry points, which exist for drivers of hardware that
+ * does not raise every event reliably. Which of the two a board driver uses is
+ * its own choice; see the Poll* methods for when each is needed.
+ *
+ * The mailbox is protocol-agnostic here: requests are routed to registered
+ * MailboxProtocols by protocol number, and the core answers the ones nobody
+ * claims. CoE is built in (a dictionary nobody can read is not a dictionary),
+ * further protocols (FoE, ...) register through RegisterMailboxProtocol(). The
+ * core implements MailboxExchange for them: reply buffer, retained response,
+ * state and object access notifications.
+ *
+ * DeviceCore is not thread-safe. Serialize Handle* and Poll* calls through one
+ * execution context; the `in_isr` argument describes callback context and does
+ * not provide synchronization. State queries also require external
+ * synchronization when another context can advance the core.
  */
-class DeviceCore final
+class DeviceCore final : private MailboxExchange
 {
  public:
   DeviceCore(EscPort& port, DevicePool& pool, std::span<DeviceClass* const> classes);
-  DeviceCore(EscPort& port, DevicePool& pool, std::initializer_list<DeviceClass*> classes);
+  DeviceCore(EscPort& port, DevicePool& pool,
+             std::initializer_list<DeviceClass*> classes);
 
   DeviceCore(const DeviceCore&) = delete;
   DeviceCore& operator=(const DeviceCore&) = delete;
@@ -94,7 +112,23 @@ class DeviceCore final
    */
   ErrorCode SetAleventMask(uint16_t mask);
 
-  [[nodiscard]] AlState GetState() const { return state_; }
+  /**
+   * Join the mailbox protocol routing during setup, before the master configures
+   * the mailbox. The handler is non-owning and must outlive this DeviceCore.
+   *
+   * The registry is indexed by protocol number and has exactly
+   * MAILBOX_PROTOCOL_COUNT slots (what the type byte's nibble can address), so
+   * there is no capacity to run out of.
+   *
+   * @return false when the protocol is reserved for mailbox errors or the slot
+   *         is already taken (the same handler twice, or two handlers claiming
+   *         one protocol).
+   * @note a protocol number outside the nibble cannot be routed at all and is a
+   *       contract violation (`REQUIRE`).
+   */
+  bool RegisterMailboxProtocol(MailboxProtocol& handler);
+
+  [[nodiscard]] AlState GetState() const override { return state_; }
   [[nodiscard]] AlError GetAlError() const { return al_error_; }
   [[nodiscard]] bool HasAlError() const { return al_error_ != AlError::NONE; }
   [[nodiscard]] const DeviceComposition& GetComposition() const { return composition_; }
@@ -148,26 +182,13 @@ class DeviceCore final
     bool response_pending = false;
   };
 
-  enum class SdoTransferDirection : uint8_t
-  {
-    NONE,
-    UPLOAD,
-    DOWNLOAD
-  };
-
-  struct SdoTransfer
-  {
-    SdoTransferDirection direction = SdoTransferDirection::NONE;
-    ObjectEntry* entry = nullptr;
-    size_t size = 0;
-    size_t offset = 0;
-    bool toggle = false;
-  };
-
-  static uint16_t ReadLe16(const uint8_t* data);
-  static uint32_t ReadLe32(const uint8_t* data);
-  static void WriteLe16(uint8_t* data, uint16_t value);
-  static void WriteLe32(uint8_t* data, uint32_t value);
+  // MailboxExchange: the reply side and the device context handed to mailbox
+  // handlers. Private: handlers see this through MailboxExchange& only.
+  [[nodiscard]] RawData ResponsePayload() override;
+  [[nodiscard]] bool Respond(uint8_t protocol, size_t payload_size) override;
+  void SendError(uint16_t error) override;
+  [[nodiscard]] ErrorCode NotifyObjectRead(ObjectAddress address) override;
+  [[nodiscard]] ErrorCode NotifyObjectWrite(ObjectAddress address) override;
 
   [[nodiscard]] ErrorCode ReadEsc(uint16_t address, void* destination, size_t size);
   [[nodiscard]] ErrorCode WriteEsc(uint16_t address, const void* source, size_t size);
@@ -181,11 +202,13 @@ class DeviceCore final
    */
   [[nodiscard]] ErrorCode SetMailboxBufferStatus(uint8_t index, bool full);
 
-  [[nodiscard]] const SyncManager* FindSyncManager(uint8_t operation_mode, uint8_t direction, uint8_t* index,
-                                                   bool require_nonzero_length = false) const;
+  [[nodiscard]] const SyncManager* FindSyncManager(
+      uint8_t operation_mode, uint8_t direction, uint8_t* index,
+      bool require_nonzero_length = false) const;
   [[nodiscard]] bool ValidateMailboxConfiguration(AlError& error);
   [[nodiscard]] bool ValidateProcessDataConfiguration(AlError& error);
-  [[nodiscard]] const Fmmu* FindFmmu(uint16_t physical_start, size_t length, uint8_t required_type) const;
+  [[nodiscard]] const Fmmu* FindFmmu(uint16_t physical_start, size_t length,
+                                     uint8_t required_type) const;
   [[nodiscard]] bool StartMailbox();
   void StopMailbox();
   [[nodiscard]] bool StartProcessData();
@@ -206,19 +229,8 @@ class DeviceCore final
 
   void ProcessMailbox(uint32_t sync_manager_events);
   [[nodiscard]] bool FlushMailboxResponse();
-  [[nodiscard]] bool QueueMailboxResponse(uint8_t protocol, size_t payload_size);
-  void SendMailboxError(uint16_t error);
-  void ProcessCoe(const uint8_t* payload, size_t payload_size);
-  void ProcessSdoUpload(const uint8_t* payload, size_t payload_size);
-  void ProcessSdoDownload(const uint8_t* payload, size_t payload_size);
-  void ProcessSdoUploadSegment(const uint8_t* payload, size_t payload_size);
-  void ProcessSdoDownloadSegment(const uint8_t* payload, size_t payload_size);
-  void SendSdoAbort(uint16_t index, uint8_t subindex, uint32_t abort_code);
-  [[nodiscard]] bool SendSdoDownloadResponse(uint16_t index, uint8_t subindex);
-  [[nodiscard]] bool IsObjectReadable(const ObjectEntry& entry) const;
-  [[nodiscard]] bool IsObjectWritable(const ObjectEntry& entry) const;
-  [[nodiscard]] size_t ObjectSize(const ObjectEntry& entry) const;
-  void ResetSdoTransfer();
+  [[nodiscard]] MailboxProtocol* FindMailboxProtocol(uint8_t protocol);
+  void ResetMailboxProtocols();
 
   // Context of the entry being processed. DeviceCore is entered from one
   // context at a time, so the class dispatch reads this instead of threading
@@ -235,7 +247,10 @@ class DeviceCore final
   uint8_t fmmu_count_ = 0;
   ProcessDataConfiguration process_data_{};
   MailboxConfiguration mailbox_{};
-  SdoTransfer sdo_transfer_{};
+  CoeProtocol coe_protocol_;
+  // Indexed by protocol number (the type byte's nibble): empty slots are
+  // protocols nobody registered.
+  std::array<MailboxProtocol*, MAILBOX_PROTOCOL_COUNT> mailbox_protocols_{};
   AlState state_ = AlState::INIT;
   AlError al_error_ = AlError::NONE;
 };

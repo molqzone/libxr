@@ -165,7 +165,7 @@ struct Object
   uint16_t index = 0;
   ObjectCode code = ObjectCode::VARIABLE;
   const char* name = nullptr;
-  ObjectEntry* entries = nullptr;
+  const ObjectEntry* entries = nullptr;
   size_t entry_count = 0;
   DeviceClass* owner = nullptr;
 };
@@ -183,8 +183,10 @@ class ObjectDictionary
   [[nodiscard]] size_t Size() const { return object_count_; }
   [[nodiscard]] const Object* Data() const { return objects_; }
 
-  [[nodiscard]] Object* FindObject(uint16_t index) const;
-  [[nodiscard]] ObjectEntry* FindEntry(ObjectAddress address) const;
+  [[nodiscard]] Object* FindObject(uint16_t index);
+  [[nodiscard]] const Object* FindObject(uint16_t index) const;
+  [[nodiscard]] ObjectEntry* FindEntry(ObjectAddress address);
+  [[nodiscard]] const ObjectEntry* FindEntry(ObjectAddress address) const;
 
  private:
   Object* objects_ = nullptr;

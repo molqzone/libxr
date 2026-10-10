@@ -3,58 +3,13 @@
 #include <cstring>
 #include <limits>
 
+#include "core/byte_order.hpp"
+
 namespace LibXR::EtherCAT
 {
 
-// 0 RequestState calls, 1 last requested state, 2 ProcessAlControl calls,
-// 3 last AL control read, 4 CoE requests, 5 last CoE command, 6/7 spare.
-extern "C"
-{
-}
-
 namespace
 {
-
-constexpr uint8_t MAILBOX_COE = 0x03U;
-constexpr uint8_t MAILBOX_ERROR = 0x00U;
-
-constexpr uint16_t MAILBOX_ERROR_UNSUPPORTED_PROTOCOL = 0x0002U;
-constexpr uint16_t MAILBOX_ERROR_SERVICE_NOT_SUPPORTED = 0x0004U;
-constexpr uint16_t MAILBOX_ERROR_INVALID_HEADER = 0x0005U;
-constexpr uint16_t MAILBOX_ERROR_INVALID_SIZE = 0x0008U;
-
-constexpr uint16_t COE_SDO_REQUEST = 0x02U;
-constexpr uint16_t COE_SDO_RESPONSE = 0x03U;
-
-constexpr uint8_t SDO_ABORT = 0x80U;
-constexpr uint8_t SDO_UPLOAD_REQUEST = 0x40U;
-constexpr uint8_t SDO_UPLOAD_RESPONSE = 0x40U;
-constexpr uint8_t SDO_UPLOAD_SEGMENT_REQUEST = 0x60U;
-constexpr uint8_t SDO_DOWNLOAD_REQUEST = 0x20U;
-constexpr uint8_t SDO_DOWNLOAD_RESPONSE = 0x60U;
-constexpr uint8_t SDO_DOWNLOAD_SEGMENT_RESPONSE = 0x20U;
-constexpr uint8_t SDO_EXPEDITED = 0x02U;
-constexpr uint8_t SDO_SIZE_INDICATED = 0x01U;
-constexpr uint8_t SDO_TOGGLE = 0x10U;
-constexpr uint8_t SDO_LAST_SEGMENT = 0x01U;
-constexpr uint8_t SDO_COMPLETE_ACCESS = 0x10U;
-
-constexpr uint32_t SDO_ABORT_TOGGLE = 0x05030000U;
-constexpr uint32_t SDO_ABORT_TIMEOUT = 0x05040000U;
-constexpr uint32_t SDO_ABORT_UNSUPPORTED = 0x06010000U;
-constexpr uint32_t SDO_ABORT_WRITE_ONLY = 0x06010001U;
-constexpr uint32_t SDO_ABORT_READ_ONLY = 0x06010002U;
-constexpr uint32_t SDO_ABORT_TYPE_MISMATCH = 0x06070010U;
-constexpr uint32_t SDO_ABORT_NO_OBJECT = 0x06020000U;
-constexpr uint32_t SDO_ABORT_GENERAL = 0x08000000U;
-
-constexpr size_t MAILBOX_HEADER_SIZE = 6U;
-constexpr size_t COE_HEADER_SIZE = 2U;
-constexpr size_t SDO_INITIATE_SIZE = 8U;
-constexpr size_t SDO_INITIATE_PAYLOAD_SIZE = COE_HEADER_SIZE + SDO_INITIATE_SIZE;
-constexpr size_t SDO_SEGMENT_HEADER_SIZE = COE_HEADER_SIZE + 1U;
-
-constexpr size_t BytesForBits(size_t bit_count) { return (bit_count + 7U) / 8U; }
 
 bool IsState(AlState value, AlState expected) { return value == expected; }
 
@@ -62,8 +17,15 @@ bool IsState(AlState value, AlState expected) { return value == expected; }
 
 DeviceCore::DeviceCore(EscPort& port, DevicePool& pool,
                        std::span<DeviceClass* const> classes)
-    : port_(port), pool_(pool), composition_(pool, classes)
+    : port_(port),
+      pool_(pool),
+      composition_(pool, classes),
+      coe_protocol_(composition_.GetObjectDictionary())
 {
+  composition_.BindEscPort(port_);
+  // CoE is the built-in mailbox protocol: the dictionary this composition just
+  // built would be unreachable without it.
+  (void)RegisterMailboxProtocol(coe_protocol_);
   PublishAlStatus();
 }
 
@@ -167,32 +129,6 @@ void DeviceCore::Dispatch(EscEvent events, uint32_t raw_alevent)
   {
     Fail(AlState::SAFE_OPERATIONAL, AlError::WATCHDOG);
   }
-}
-
-uint16_t DeviceCore::ReadLe16(const uint8_t* data)
-{
-  return static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8U);
-}
-
-uint32_t DeviceCore::ReadLe32(const uint8_t* data)
-{
-  return static_cast<uint32_t>(data[0]) | (static_cast<uint32_t>(data[1]) << 8U) |
-         (static_cast<uint32_t>(data[2]) << 16U) |
-         (static_cast<uint32_t>(data[3]) << 24U);
-}
-
-void DeviceCore::WriteLe16(uint8_t* data, uint16_t value)
-{
-  data[0] = static_cast<uint8_t>(value);
-  data[1] = static_cast<uint8_t>(value >> 8U);
-}
-
-void DeviceCore::WriteLe32(uint8_t* data, uint32_t value)
-{
-  data[0] = static_cast<uint8_t>(value);
-  data[1] = static_cast<uint8_t>(value >> 8U);
-  data[2] = static_cast<uint8_t>(value >> 16U);
-  data[3] = static_cast<uint8_t>(value >> 24U);
 }
 
 ErrorCode DeviceCore::ReadEsc(uint16_t address, void* destination, size_t size)
@@ -367,8 +303,22 @@ bool DeviceCore::ValidateMailboxConfiguration(AlError& error)
       static_cast<uint32_t>(request->physical_start) + request->length;
   const uint32_t response_end =
       static_cast<uint32_t>(response->physical_start) + response->length;
-  if (request->length < MAILBOX_HEADER_SIZE + SDO_INITIATE_PAYLOAD_SIZE ||
-      response->length < MAILBOX_HEADER_SIZE + SDO_INITIATE_PAYLOAD_SIZE ||
+
+  // The mailbox must carry at least one message every registered mailbox
+  // protocol acts on (for CoE: one SDO initiate request/response).
+  size_t min_payload = 0;
+  for (const MailboxProtocol* handler : mailbox_protocols_)
+  {
+    if (handler == nullptr)
+    {
+      continue;
+    }
+    const size_t required = handler->MinPayloadSize();
+    min_payload = required > min_payload ? required : min_payload;
+  }
+
+  if (request->length < MAILBOX_HEADER_SIZE + min_payload ||
+      response->length < MAILBOX_HEADER_SIZE + min_payload ||
       request_end > 0x10000U || response_end > 0x10000U ||
       pool_.storage_.mailbox_request == nullptr ||
       pool_.storage_.mailbox_request_capacity < request->length ||
@@ -503,7 +453,7 @@ void DeviceCore::StopMailbox()
     (void)SetSyncManagerEnabled(mailbox_.response_sync_manager, false);
   }
   mailbox_ = {};
-  ResetSdoTransfer();
+  ResetMailboxProtocols();
 }
 
 bool DeviceCore::StartProcessData()
@@ -739,7 +689,7 @@ void DeviceCore::Fail(AlState fallback_state, AlError error)
     composition_.DispatchStateChanged(in_isr_, previous_state, fallback_state);
   }
   al_error_ = error;
-  ResetSdoTransfer();
+  ResetMailboxProtocols();
   PublishAlStatus();
 }
 
@@ -825,6 +775,11 @@ void DeviceCore::PollMailbox()
   // every time this is called, which floods the master with unsolicited
   // responses and keeps it from reaching OP.
   (void)FlushMailboxResponse();
+  // A request whose SM event was lost (reading AL Event Request clears it) would
+  // then sit forever - the master's retries cannot even land, because the ESC
+  // refuses a write into a still-full buffer. Feed the request path a synthetic
+  // event every poll; the status check inside decides whether one is pending.
+  ProcessMailbox(EscRegister::SyncManagerEvent(mailbox_.request_sync_manager));
 }
 
 void DeviceCore::PollProcessData()
@@ -874,6 +829,24 @@ void DeviceCore::ProcessMailbox(uint32_t sync_manager_events)
     return;
   }
 
+  // The SM event is advisory; the buffer status is authoritative. The event can
+  // arrive before the master's bytes have landed (measured: the request buffer
+  // read back as 512 zeros and the request was then silently dropped), and our
+  // own buffer accesses raise SM events again. Only a *full* request buffer is
+  // read - full means the master wrote the whole message.
+  {
+    uint8_t request_status = 0;
+    const uint16_t status_address = static_cast<uint16_t>(
+        EscRegister::SYNC_MANAGER_BASE +
+        mailbox_.request_sync_manager * EscRegister::SYNC_MANAGER_SIZE + 5U);
+    if (ReadEsc(status_address, &request_status, sizeof(request_status)) !=
+            ErrorCode::OK ||
+        (request_status & EscRegister::SYNC_MANAGER_STATUS_MAILBOX) == 0U)
+    {
+      return;
+    }
+  }
+
   uint8_t* request = pool_.storage_.mailbox_request;
   // The whole SyncManager buffer has to be read. This ESC does not accept a
   // partial mailbox read: reading only the header (to size the transfer) leaves
@@ -895,7 +868,7 @@ void DeviceCore::ProcessMailbox(uint32_t sync_manager_events)
   const size_t payload_size = ReadLe16(request);
   if (payload_size > mailbox_.request.length - MAILBOX_HEADER_SIZE)
   {
-    SendMailboxError(MAILBOX_ERROR_INVALID_SIZE);
+    SendError(MAILBOX_ERROR_INVALID_SIZE);
     return;
   }
   if (payload_size == 0U)
@@ -910,7 +883,7 @@ void DeviceCore::ProcessMailbox(uint32_t sync_manager_events)
   // and the transfer silently transferred nothing. Re-processing a genuinely
   // repeated request is harmless (SDO reads and writes are idempotent) and it is
   // what keeps the state machine honest.
-  const uint8_t protocol = static_cast<uint8_t>(request[5] & 0x0FU);
+  const uint8_t protocol = static_cast<uint8_t>(request[5] & MAILBOX_PROTOCOL_MASK);
   const uint8_t counter = static_cast<uint8_t>((request[5] >> 4U) & 0x07U);
 
   // A request we have not seen before proves the master consumed the previous
@@ -922,12 +895,13 @@ void DeviceCore::ProcessMailbox(uint32_t sync_manager_events)
   mailbox_.last_request_counter = counter;
   mailbox_.last_request_protocol = protocol;
   mailbox_.has_cached_response = false;
-  if (protocol == MAILBOX_COE)
+  MailboxProtocol* handler = FindMailboxProtocol(protocol);
+  if (handler != nullptr)
   {
-    ProcessCoe(request + MAILBOX_HEADER_SIZE, payload_size);
+    handler->Handle(*this, request + MAILBOX_HEADER_SIZE, payload_size);
     return;
   }
-  SendMailboxError(MAILBOX_ERROR_UNSUPPORTED_PROTOCOL);
+  SendError(MAILBOX_ERROR_UNSUPPORTED_PROTOCOL);
 }
 
 bool DeviceCore::FlushMailboxResponse()
@@ -973,7 +947,7 @@ bool DeviceCore::FlushMailboxResponse()
   return true;
 }
 
-bool DeviceCore::QueueMailboxResponse(uint8_t protocol, size_t payload_size)
+bool DeviceCore::Respond(uint8_t protocol, size_t payload_size)
 {
   if (!mailbox_.enabled || mailbox_.response_pending ||
       payload_size > mailbox_.response.length - MAILBOX_HEADER_SIZE ||
@@ -1000,439 +974,66 @@ bool DeviceCore::QueueMailboxResponse(uint8_t protocol, size_t payload_size)
   return true;
 }
 
-void DeviceCore::SendMailboxError(uint16_t error)
+void DeviceCore::SendError(uint16_t error)
 {
   uint8_t* payload = pool_.storage_.mailbox_response + MAILBOX_HEADER_SIZE;
   WriteLe16(payload, 0U);
   WriteLe16(payload + 2U, error);
-  (void)QueueMailboxResponse(MAILBOX_ERROR, 4U);
+  (void)Respond(MAILBOX_PROTOCOL_ERROR, 4U);
 }
 
-void DeviceCore::ProcessCoe(const uint8_t* payload, size_t payload_size)
+bool DeviceCore::RegisterMailboxProtocol(MailboxProtocol& handler)
 {
-  if (payload_size < COE_HEADER_SIZE)
+  const uint8_t protocol = handler.Protocol();
+  if (protocol == MAILBOX_PROTOCOL_ERROR)
   {
-    SendMailboxError(MAILBOX_ERROR_INVALID_HEADER);
-    return;
+    return false;
   }
-
-  const uint16_t service = static_cast<uint16_t>(ReadLe16(payload) >> 12U);
-  if (service != COE_SDO_REQUEST)
+  // The wire addresses protocols by the type byte's nibble, so a handler beyond
+  // it could never be routed: a contract violation, not a capacity shortage.
+  REQUIRE(protocol < MAILBOX_PROTOCOL_COUNT);
+  if (protocol >= MAILBOX_PROTOCOL_COUNT || mailbox_protocols_[protocol] != nullptr)
   {
-    SendMailboxError(MAILBOX_ERROR_SERVICE_NOT_SUPPORTED);
-    return;
+    return false;
   }
-  if (payload_size < COE_HEADER_SIZE + 1U)
-  {
-    SendMailboxError(MAILBOX_ERROR_INVALID_SIZE);
-    return;
-  }
-
-  const uint8_t command = payload[COE_HEADER_SIZE];
-  if ((command & 0xE0U) == SDO_UPLOAD_SEGMENT_REQUEST)
-  {
-    ProcessSdoUploadSegment(payload, payload_size);
-  }
-  else if ((command & 0xE0U) == SDO_UPLOAD_REQUEST)
-  {
-    ProcessSdoUpload(payload, payload_size);
-  }
-  else if ((command & 0xE0U) == SDO_DOWNLOAD_REQUEST)
-  {
-    ProcessSdoDownload(payload, payload_size);
-  }
-  else if ((command & 0xE0U) == 0U)
-  {
-    ProcessSdoDownloadSegment(payload, payload_size);
-  }
-  else if (command == SDO_ABORT)
-  {
-    ResetSdoTransfer();
-  }
-  else
-  {
-    SendMailboxError(MAILBOX_ERROR_SERVICE_NOT_SUPPORTED);
-  }
+  mailbox_protocols_[protocol] = &handler;
+  return true;
 }
 
-void DeviceCore::ProcessSdoUpload(const uint8_t* payload, size_t payload_size)
+MailboxProtocol* DeviceCore::FindMailboxProtocol(uint8_t protocol)
 {
-  if (payload_size < 6U)
-  {
-    SendSdoAbort(0U, 0U, SDO_ABORT_GENERAL);
-    return;
-  }
-
-  const uint8_t command = payload[2];
-  const uint16_t index = ReadLe16(payload + 3U);
-  const uint8_t subindex = payload[5];
-  if ((command & SDO_COMPLETE_ACCESS) != 0U)
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_UNSUPPORTED);
-    return;
-  }
-  if (sdo_transfer_.direction != SdoTransferDirection::NONE)
-  {
-    // The mailbox is a strict request/response pair, so an initiate that arrives
-    // while a transfer is still marked as running means that transfer is over:
-    // its segments would have been dispatched to the segment handlers instead.
-    // Aborting here (0x05040000) made the slave refuse every later SDO once one
-    // transfer leaked its state, which is exactly what the master saw.
-    ResetSdoTransfer();
-  }
-
-  ObjectEntry* entry = composition_.GetObjectDictionary().FindEntry({index, subindex});
-  if (entry == nullptr)
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_NO_OBJECT);
-    return;
-  }
-  if (!IsObjectReadable(*entry))
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_WRITE_ONLY);
-    return;
-  }
-  const size_t size = ObjectSize(*entry);
-  if (entry->storage.addr_ == nullptr || entry->storage.size_ < size ||
-      composition_.DispatchObjectRead(in_isr_, entry->address) != ErrorCode::OK)
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_GENERAL);
-    return;
-  }
-
-  uint8_t* response = pool_.storage_.mailbox_response + MAILBOX_HEADER_SIZE;
-  WriteLe16(response, static_cast<uint16_t>(COE_SDO_RESPONSE << 12U));
-  response[2] = static_cast<uint8_t>(SDO_UPLOAD_RESPONSE | SDO_SIZE_INDICATED);
-  WriteLe16(response + 3U, index);
-  response[5] = subindex;
-
-  const size_t inline_capacity =
-      mailbox_.response.length - MAILBOX_HEADER_SIZE - SDO_INITIATE_PAYLOAD_SIZE;
-  if (size <= 4U)
-  {
-    response[2] = static_cast<uint8_t>(response[2] | SDO_EXPEDITED | ((4U - size) << 2U));
-    std::memset(response + 6U, 0, 4U);
-    std::memcpy(response + 6U, entry->storage.addr_, size);
-    (void)QueueMailboxResponse(MAILBOX_COE, SDO_INITIATE_PAYLOAD_SIZE);
-    return;
-  }
-
-  WriteLe32(response + 6U, static_cast<uint32_t>(size));
-  if (size <= inline_capacity)
-  {
-    std::memcpy(response + SDO_INITIATE_PAYLOAD_SIZE, entry->storage.addr_, size);
-    (void)QueueMailboxResponse(MAILBOX_COE, SDO_INITIATE_PAYLOAD_SIZE + size);
-    return;
-  }
-
-  if (QueueMailboxResponse(MAILBOX_COE, SDO_INITIATE_PAYLOAD_SIZE))
-  {
-    sdo_transfer_ = {SdoTransferDirection::UPLOAD, entry, size, 0U, false};
-  }
+  return protocol < MAILBOX_PROTOCOL_COUNT ? mailbox_protocols_[protocol] : nullptr;
 }
 
-void DeviceCore::ProcessSdoDownload(const uint8_t* payload, size_t payload_size)
+void DeviceCore::ResetMailboxProtocols()
 {
-  if (payload_size < 6U)
+  for (MailboxProtocol* handler : mailbox_protocols_)
   {
-    SendSdoAbort(0U, 0U, SDO_ABORT_GENERAL);
-    return;
-  }
-
-  const uint8_t command = payload[2];
-  const uint16_t index = ReadLe16(payload + 3U);
-  const uint8_t subindex = payload[5];
-  if ((command & SDO_COMPLETE_ACCESS) != 0U)
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_UNSUPPORTED);
-    return;
-  }
-  if (sdo_transfer_.direction != SdoTransferDirection::NONE)
-  {
-    // The mailbox is a strict request/response pair, so an initiate that arrives
-    // while a transfer is still marked as running means that transfer is over:
-    // its segments would have been dispatched to the segment handlers instead.
-    // Aborting here (0x05040000) made the slave refuse every later SDO once one
-    // transfer leaked its state, which is exactly what the master saw.
-    ResetSdoTransfer();
-  }
-
-  ObjectEntry* entry = composition_.GetObjectDictionary().FindEntry({index, subindex});
-  if (entry == nullptr)
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_NO_OBJECT);
-    return;
-  }
-  if (!IsObjectWritable(*entry))
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_READ_ONLY);
-    return;
-  }
-
-  const size_t size = ObjectSize(*entry);
-  if (entry->storage.addr_ == nullptr || entry->storage.size_ < size)
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_GENERAL);
-    return;
-  }
-
-  if ((command & SDO_EXPEDITED) != 0U)
-  {
-    if (payload_size < SDO_INITIATE_PAYLOAD_SIZE)
+    if (handler != nullptr)
     {
-      SendSdoAbort(index, subindex, SDO_ABORT_TYPE_MISMATCH);
-      return;
-    }
-    const size_t transfer_size =
-        (command & SDO_SIZE_INDICATED) != 0U ? 4U - ((command >> 2U) & 0x03U) : 4U;
-    if (transfer_size != size)
-    {
-      SendSdoAbort(index, subindex, SDO_ABORT_TYPE_MISMATCH);
-      return;
-    }
-    std::memcpy(entry->storage.addr_, payload + 6U, size);
-    if (composition_.DispatchObjectWrite(in_isr_, entry->address) != ErrorCode::OK)
-    {
-      SendSdoAbort(index, subindex, SDO_ABORT_GENERAL);
-      return;
-    }
-    (void)SendSdoDownloadResponse(index, subindex);
-    return;
-  }
-
-  if ((command & SDO_SIZE_INDICATED) == 0U || payload_size < SDO_INITIATE_PAYLOAD_SIZE)
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_TYPE_MISMATCH);
-    return;
-  }
-  if (ReadLe32(payload + 6U) != size)
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_TYPE_MISMATCH);
-    return;
-  }
-
-  // A normal (non expedited) download carries data in the initiate frame itself
-  // when the object fits the mailbox: the size is at payload[6..9] and the bytes
-  // follow right after it. Masters use that for everything up to the mailbox
-  // size, so replying without copying these bytes loses the whole transfer.
-  const size_t carried = payload_size - SDO_INITIATE_PAYLOAD_SIZE;
-  if (carried > size)
-  {
-    SendSdoAbort(index, subindex, SDO_ABORT_TYPE_MISMATCH);
-    return;
-  }
-  if (carried > 0U)
-  {
-    std::memcpy(entry->storage.addr_, payload + SDO_INITIATE_PAYLOAD_SIZE, carried);
-  }
-
-  if (carried == size)
-  {
-    if (composition_.DispatchObjectWrite(in_isr_, entry->address) != ErrorCode::OK)
-    {
-      SendSdoAbort(index, subindex, SDO_ABORT_GENERAL);
-      return;
-    }
-    (void)SendSdoDownloadResponse(index, subindex);
-    return;
-  }
-
-  // Only part of the object arrived: the rest follows as segments.
-  if (SendSdoDownloadResponse(index, subindex))
-  {
-    sdo_transfer_ = {SdoTransferDirection::DOWNLOAD, entry, size, carried, false};
-  }
-}
-
-void DeviceCore::ProcessSdoUploadSegment(const uint8_t* payload, size_t payload_size)
-{
-  if (sdo_transfer_.direction != SdoTransferDirection::UPLOAD || payload_size < 3U)
-  {
-    SendSdoAbort(0U, 0U, SDO_ABORT_TIMEOUT);
-    return;
-  }
-
-  const bool toggle = (payload[2] & SDO_TOGGLE) != 0U;
-  if (toggle != sdo_transfer_.toggle)
-  {
-    SendSdoAbort(sdo_transfer_.entry->address.index,
-                 sdo_transfer_.entry->address.subindex, SDO_ABORT_TOGGLE);
-    ResetSdoTransfer();
-    return;
-  }
-
-  const size_t available =
-      mailbox_.response.length - MAILBOX_HEADER_SIZE - SDO_SEGMENT_HEADER_SIZE;
-  const size_t remaining = sdo_transfer_.size - sdo_transfer_.offset;
-  const size_t transfer_size = remaining < available ? remaining : available;
-  const bool last = transfer_size == remaining;
-  uint8_t* response = pool_.storage_.mailbox_response + MAILBOX_HEADER_SIZE;
-  WriteLe16(response, static_cast<uint16_t>(COE_SDO_RESPONSE << 12U));
-  response[2] =
-      static_cast<uint8_t>((toggle ? SDO_TOGGLE : 0U) | (last ? SDO_LAST_SEGMENT : 0U));
-  if (last && transfer_size < 7U)
-  {
-    response[2] = static_cast<uint8_t>(response[2] | ((7U - transfer_size) << 1U));
-  }
-  std::memcpy(response + SDO_SEGMENT_HEADER_SIZE,
-              static_cast<const uint8_t*>(sdo_transfer_.entry->storage.addr_) +
-                  sdo_transfer_.offset,
-              transfer_size);
-  if (QueueMailboxResponse(MAILBOX_COE, SDO_SEGMENT_HEADER_SIZE + transfer_size))
-  {
-    sdo_transfer_.offset += transfer_size;
-    if (last)
-    {
-      ResetSdoTransfer();
-    }
-    else
-    {
-      sdo_transfer_.toggle = !sdo_transfer_.toggle;
+      handler->Reset();
     }
   }
-  else if (last)
-  {
-    // Same as for a download: a response that is still waiting for the master
-    // must not leave the transfer marked as running.
-    ResetSdoTransfer();
-  }
 }
 
-void DeviceCore::ProcessSdoDownloadSegment(const uint8_t* payload, size_t payload_size)
+RawData DeviceCore::ResponsePayload()
 {
-  if (sdo_transfer_.direction != SdoTransferDirection::DOWNLOAD || payload_size < 3U)
+  if (!mailbox_.enabled || mailbox_.response.length < MAILBOX_HEADER_SIZE)
   {
-    SendSdoAbort(0U, 0U, SDO_ABORT_TIMEOUT);
-    return;
+    return {};
   }
-
-  const uint8_t command = payload[2];
-  const bool toggle = (command & SDO_TOGGLE) != 0U;
-  if (toggle != sdo_transfer_.toggle)
-  {
-    SendSdoAbort(sdo_transfer_.entry->address.index,
-                 sdo_transfer_.entry->address.subindex, SDO_ABORT_TOGGLE);
-    ResetSdoTransfer();
-    return;
-  }
-
-  size_t transfer_size = payload_size - SDO_SEGMENT_HEADER_SIZE;
-  const bool last = (command & SDO_LAST_SEGMENT) != 0U;
-  const size_t unused = last ? ((command >> 1U) & 0x07U) : 0U;
-  if (unused > transfer_size ||
-      transfer_size - unused > sdo_transfer_.size - sdo_transfer_.offset)
-  {
-    SendSdoAbort(sdo_transfer_.entry->address.index,
-                 sdo_transfer_.entry->address.subindex, SDO_ABORT_TYPE_MISMATCH);
-    ResetSdoTransfer();
-    return;
-  }
-  transfer_size -= unused;
-  std::memcpy(
-      static_cast<uint8_t*>(sdo_transfer_.entry->storage.addr_) + sdo_transfer_.offset,
-      payload + SDO_SEGMENT_HEADER_SIZE, transfer_size);
-  sdo_transfer_.offset += transfer_size;
-
-  if (last && sdo_transfer_.offset != sdo_transfer_.size)
-  {
-    SendSdoAbort(sdo_transfer_.entry->address.index,
-                 sdo_transfer_.entry->address.subindex, SDO_ABORT_TYPE_MISMATCH);
-    ResetSdoTransfer();
-    return;
-  }
-
-  uint8_t* response = pool_.storage_.mailbox_response + MAILBOX_HEADER_SIZE;
-  WriteLe16(response, static_cast<uint16_t>(COE_SDO_RESPONSE << 12U));
-  response[2] =
-      static_cast<uint8_t>(SDO_DOWNLOAD_SEGMENT_RESPONSE | (toggle ? SDO_TOGGLE : 0U));
-
-  if (last && composition_.DispatchObjectWrite(in_isr_, sdo_transfer_.entry->address) !=
-                  ErrorCode::OK)
-  {
-    SendSdoAbort(sdo_transfer_.entry->address.index,
-                 sdo_transfer_.entry->address.subindex, SDO_ABORT_GENERAL);
-    ResetSdoTransfer();
-    return;
-  }
-
-  if (!QueueMailboxResponse(MAILBOX_COE, SDO_SEGMENT_HEADER_SIZE))
-  {
-    // The response could not be queued because the previous one is still waiting
-    // for the master to read it. The transfer itself is finished either way, so
-    // the state must not stay in DOWNLOAD: that would abort every following
-    // request with a timeout.
-    if (last)
-    {
-      ResetSdoTransfer();
-    }
-    return;
-  }
-  if (last)
-  {
-    ResetSdoTransfer();
-  }
-  else
-  {
-    sdo_transfer_.toggle = !sdo_transfer_.toggle;
-  }
+  return RawData(pool_.storage_.mailbox_response + MAILBOX_HEADER_SIZE,
+                 mailbox_.response.length - MAILBOX_HEADER_SIZE);
 }
 
-void DeviceCore::SendSdoAbort(uint16_t index, uint8_t subindex, uint32_t abort_code)
+ErrorCode DeviceCore::NotifyObjectRead(ObjectAddress address)
 {
-  uint8_t* response = pool_.storage_.mailbox_response + MAILBOX_HEADER_SIZE;
-  WriteLe16(response, static_cast<uint16_t>(COE_SDO_RESPONSE << 12U));
-  response[2] = SDO_ABORT;
-  WriteLe16(response + 3U, index);
-  response[5] = subindex;
-  WriteLe32(response + 6U, abort_code);
-  (void)QueueMailboxResponse(MAILBOX_COE, SDO_INITIATE_PAYLOAD_SIZE);
+  return composition_.DispatchObjectRead(in_isr_, address);
 }
 
-bool DeviceCore::SendSdoDownloadResponse(uint16_t index, uint8_t subindex)
+ErrorCode DeviceCore::NotifyObjectWrite(ObjectAddress address)
 {
-  uint8_t* response = pool_.storage_.mailbox_response + MAILBOX_HEADER_SIZE;
-  WriteLe16(response, static_cast<uint16_t>(COE_SDO_RESPONSE << 12U));
-  response[2] = SDO_DOWNLOAD_RESPONSE;
-  WriteLe16(response + 3U, index);
-  response[5] = subindex;
-  return QueueMailboxResponse(MAILBOX_COE, 6U);
+  return composition_.DispatchObjectWrite(in_isr_, address);
 }
-
-bool DeviceCore::IsObjectReadable(const ObjectEntry& entry) const
-{
-  switch (state_)
-  {
-    case AlState::PRE_OPERATIONAL:
-      return HasAccess(entry.access, ObjectAccess::READ_PRE_OPERATIONAL);
-    case AlState::SAFE_OPERATIONAL:
-      return HasAccess(entry.access, ObjectAccess::READ_SAFE_OPERATIONAL);
-    case AlState::OPERATIONAL:
-      return HasAccess(entry.access, ObjectAccess::READ_OPERATIONAL);
-    default:
-      return false;
-  }
-}
-
-bool DeviceCore::IsObjectWritable(const ObjectEntry& entry) const
-{
-  switch (state_)
-  {
-    case AlState::PRE_OPERATIONAL:
-      return HasAccess(entry.access, ObjectAccess::WRITE_PRE_OPERATIONAL);
-    case AlState::SAFE_OPERATIONAL:
-      return HasAccess(entry.access, ObjectAccess::WRITE_SAFE_OPERATIONAL);
-    case AlState::OPERATIONAL:
-      return HasAccess(entry.access, ObjectAccess::WRITE_OPERATIONAL);
-    default:
-      return false;
-  }
-}
-
-size_t DeviceCore::ObjectSize(const ObjectEntry& entry) const
-{
-  return BytesForBits(entry.bit_length);
-}
-
-void DeviceCore::ResetSdoTransfer() { sdo_transfer_ = {}; }
 
 }  // namespace LibXR::EtherCAT

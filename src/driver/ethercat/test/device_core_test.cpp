@@ -3,15 +3,88 @@
 #include <cstring>
 #include <cstdint>
 #include <initializer_list>
+#include <type_traits>
+#include <utility>
 
 #include "core/esc_registers.hpp"
 #include "device/device_core.hpp"
+#include "device/coe/coe_layout_device.hpp"
 
 using namespace LibXR;
 using namespace LibXR::EtherCAT;
 
 namespace
 {
+
+struct WideStringLayout
+{
+  enum class DataType : uint16_t
+  {
+    BOOLEAN = 0x0001,
+    INTEGER8 = 0x0002,
+    INTEGER16 = 0x0003,
+    INTEGER32 = 0x0004,
+    UNSIGNED8 = 0x0005,
+    UNSIGNED16 = 0x0006,
+    UNSIGNED32 = 0x0007,
+    REAL32 = 0x0008,
+    VISIBLE_STRING = 0x0009,
+    OCTET_STRING = 0x000A,
+    REAL64 = 0x0011,
+    INTEGER64 = 0x0015,
+    UNSIGNED64 = 0x001B
+  };
+  enum class Direction : uint8_t
+  {
+    RX = 0,
+    TX = 1
+  };
+  struct Entry
+  {
+    uint16_t index;
+    uint8_t subindex;
+    uint16_t bit_length;
+    DataType type;
+    uint16_t access;
+    uint16_t pdo_index;
+    Direction pdo_direction;
+    const char* object_name;
+  };
+  struct Pdo
+  {
+    uint16_t index;
+    Direction direction;
+  };
+
+  static constexpr Entry kEntries[] = {{0x2000, 1, 72, DataType::OCTET_STRING,
+                                        0x78, 0x1600, Direction::RX, "Window"}};
+  static constexpr Pdo kPdos[] = {{0x1600, Direction::RX}};
+  static constexpr size_t kEntryCount = 1;
+  static constexpr size_t kObjectCount = 1;
+  static constexpr size_t kPdoCount = 1;
+  static constexpr uint16_t ACCESS_RX = 0x78;
+  static constexpr uint16_t ACCESS_TX = 0x87;
+};
+
+template <WideStringLayout::DataType Type, uint16_t Bits>
+struct ScalarLayout : WideStringLayout
+{
+  inline static constexpr Entry kEntries[] = {
+      {0x2000, 1, Bits, Type, ACCESS_RX, 0x1600, Direction::RX, "Value"}};
+};
+
+using BooleanLayout = ScalarLayout<WideStringLayout::DataType::BOOLEAN, 1>;
+
+static_assert(CoeLayoutDevice<WideStringLayout>::kMaxStorageBytes == 9U);
+static_assert(CoeLayoutDevice<BooleanLayout>::kMaxStorageBytes == 1U);
+static_assert(ObjectDataTypeOf<bool>() == ObjectDataType::BOOLEAN);
+static_assert(ObjectBitLengthOf<bool>() == 1U);
+static_assert(std::is_same_v<
+              decltype(std::declval<const ObjectDictionary&>().FindEntry(ObjectAddress{})),
+              const ObjectEntry*>);
+static_assert(std::is_same_v<
+              decltype(std::declval<ObjectDictionary&>().FindEntry(ObjectAddress{})),
+              ObjectEntry*>);
 
 class FakeEsc final : public EscPort
 {
@@ -47,6 +120,18 @@ class FakeEsc final : public EscPort
   std::array<uint8_t, 0x10000> memory{};
 };
 
+class TestMailboxProtocol final : public MailboxProtocol
+{
+ public:
+  explicit TestMailboxProtocol(uint8_t protocol) : protocol_(protocol) {}
+
+  uint8_t Protocol() const override { return protocol_; }
+  void Handle(MailboxExchange&, const uint8_t*, size_t) override {}
+
+ private:
+  uint8_t protocol_;
+};
+
 void Put16(std::array<uint8_t, 0x10000>& memory, uint16_t address, uint16_t value)
 {
   memory[address] = static_cast<uint8_t>(value);
@@ -57,6 +142,19 @@ void Put32(std::array<uint8_t, 0x10000>& memory, uint16_t address, uint32_t valu
 {
   Put16(memory, address, static_cast<uint16_t>(value));
   Put16(memory, static_cast<uint16_t>(address + 2U), static_cast<uint16_t>(value >> 16U));
+}
+
+/**
+ * Model the ESC's request-buffer-full handshake. The master writing a mailbox
+ * message is what sets the request SyncManager's status bit; the core reads a
+ * *full* request buffer only (DeviceCore::ProcessMailbox: the SM event alone is
+ * advisory, see the comment there) and clears the bit after reading. FakeEsc is
+ * plain memory, so the test drives the bit by hand for every request the master
+ * sends.
+ */
+void MasterWritesRequest(std::array<uint8_t, 0x10000>& memory)
+{
+  memory[0x0805] = EscRegister::SYNC_MANAGER_STATUS_MAILBOX;
 }
 
 class IoDevice final : public DeviceClass
@@ -100,6 +198,11 @@ class IoDevice final : public DeviceClass
 
 int main()
 {
+  CoeLayoutDevice<BooleanLayout> boolean_layout;
+  bool* boolean_value = boolean_layout.BindAs<bool>(0x2000, 1);
+  *boolean_value = true;
+  assert(*boolean_value);
+
   FakeEsc esc;
   IoDevice application;
   StaticDevicePool<1, 3, 3, 2, 2, 8, 64> pool;
@@ -135,6 +238,8 @@ int main()
   esc.memory[0x061C] = 0x01;
 
   DeviceCore core(esc, pool, {&application});
+  TestMailboxProtocol error_protocol(MAILBOX_PROTOCOL_ERROR);
+  assert(!core.RegisterMailboxProtocol(error_protocol));
 
   Put16(esc.memory, 0x0120, static_cast<uint16_t>(AlState::PRE_OPERATIONAL));
   core.HandleAlevent(EscRegister::EVENT_AL_CONTROL, false);
@@ -184,6 +289,7 @@ int main()
   mailbox_esc.memory[0x1008] = 0x40;
   Put16(mailbox_esc.memory, 0x1009, 0x6010);
   mailbox_esc.memory[0x100B] = 0;
+  MasterWritesRequest(mailbox_esc.memory);
   mailbox_application.input = 0x31;
   mailbox_esc.memory[0x080D] = EscRegister::SYNC_MANAGER_STATUS_MAILBOX;
   mailbox_core.HandleAlevent(1U << 8U, false);
@@ -202,6 +308,7 @@ int main()
   Put16(mailbox_esc.memory, 0x1009, 0x6000);
   mailbox_esc.memory[0x100B] = 0;
   mailbox_esc.memory[0x100C] = 0x77;
+  MasterWritesRequest(mailbox_esc.memory);
   mailbox_core.HandleAlevent(1U << 8U, false);
   assert(mailbox_application.output == 0x77);
   assert(mailbox_application.object_write_count == 1);
@@ -209,12 +316,14 @@ int main()
   assert(mailbox_esc.memory[0x1048] == 0x60);
 
   mailbox_esc.memory[0x1040] = 0;
-  mailbox_core.HandleAlevent(EscRegister::SyncManagerEvent(0), false);
-  // There is no duplicate suppression: an SM0 event that repeats a request the
-  // master has not consumed is processed again, because the mailbox counter
+  // The master retransmits the request because the response never reached it,
+  // so the request buffer is full again and the request is processed again.
+  // There is no duplicate suppression beyond that, because the mailbox counter
   // cannot tell a retransmission from the next segment of one SDO transfer, see
   // the comment in DeviceCore::ProcessMailbox. The repeated write is idempotent
   // and the response is published again.
+  MasterWritesRequest(mailbox_esc.memory);
+  mailbox_core.HandleAlevent(EscRegister::SyncManagerEvent(0), false);
   assert(mailbox_application.object_write_count == 2);
   assert(mailbox_esc.memory[0x1040] == 6);
   assert(mailbox_esc.memory[0x1048] == 0x60);
@@ -245,6 +354,7 @@ int main()
   segmented_esc.memory[0x1008] = 0x40;
   Put16(segmented_esc.memory, 0x1009, 0x2000);
   segmented_esc.memory[0x100B] = 0;
+  MasterWritesRequest(segmented_esc.memory);
   segmented_core.HandleAlevent(1U << 8U, false);
   assert(segmented_esc.memory[0x1048] == 0x41);
 
@@ -252,6 +362,7 @@ int main()
   segmented_esc.memory[0x1005] = 0x23;
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x60;
+  MasterWritesRequest(segmented_esc.memory);
   segmented_core.HandleAlevent(1U << 8U, false);
   assert(segmented_esc.memory[0x1048] == 0x00);
   assert(segmented_esc.memory[0x1049] == 1);
@@ -261,6 +372,7 @@ int main()
   segmented_esc.memory[0x1005] = 0x33;
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x70;
+  MasterWritesRequest(segmented_esc.memory);
   segmented_core.HandleAlevent(1U << 8U, false);
   assert(segmented_esc.memory[0x1048] == 0x1D);
   assert(segmented_esc.memory[0x1049] == 8);
@@ -274,6 +386,7 @@ int main()
   Put16(segmented_esc.memory, 0x1009, 0x2000);
   segmented_esc.memory[0x100B] = 0;
   Put32(segmented_esc.memory, 0x100C, 8);
+  MasterWritesRequest(segmented_esc.memory);
   segmented_core.HandleAlevent(1U << 8U, false);
   assert(segmented_esc.memory[0x1048] == 0x60);
 
@@ -285,6 +398,7 @@ int main()
   {
     segmented_esc.memory[0x1009 + index] = static_cast<uint8_t>(index + 1U);
   }
+  MasterWritesRequest(segmented_esc.memory);
   segmented_core.HandleAlevent(1U << 8U, false);
   assert(segmented_esc.memory[0x1048] == 0x20);
 
@@ -293,6 +407,7 @@ int main()
   Put16(segmented_esc.memory, 0x1006, 0x2000);
   segmented_esc.memory[0x1008] = 0x1D;
   segmented_esc.memory[0x1009] = 8;
+  MasterWritesRequest(segmented_esc.memory);
   segmented_core.HandleAlevent(1U << 8U, false);
   assert(segmented_esc.memory[0x1048] == 0x30);
   for (uint8_t index = 0; index < segmented_application.parameter.size(); ++index)
