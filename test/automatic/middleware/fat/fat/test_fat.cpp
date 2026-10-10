@@ -156,6 +156,10 @@ std::string ToLower(std::string s)
 
 void TestOneImage(const char* img, const char* fat_flag, bool expect_fat32)
 {
+  // mkfs.vfat -C 不清除已有镜像；残留文件会让 mcopy 弹交互提示并阻塞。
+  // mkfs.vfat -C does not wipe an existing image; stale files make mcopy
+  // prompt on stdin and block.
+  RunCommand(std::string("rm -f ") + img);
   std::string mk = std::string("mkfs.vfat -F ") + fat_flag + " -C " + img + " ";
   mk += (std::string(fat_flag) == "16") ? "16384" : "32768";
   if (RunCommand(mk).find("mkfs.fat") == std::string::npos)
