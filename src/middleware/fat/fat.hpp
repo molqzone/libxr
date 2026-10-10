@@ -75,6 +75,56 @@ class Fat
    */
   ErrorCode FindFile(const char* path, FatDirEntry& entry_out);
 
+  /**
+   * @brief 按路径创建文件（已存在则返回现有项，M3b）。
+   *        Create a file by path (returns existing entry if present).
+   * @param path 绝对文件路径 / Absolute file path
+   * @param entry_out 输出：新目录项（size=0, clus=0）/ Out: new entry
+   * @return OK / NOT_FOUND（父目录不存在）/ FULL（短名耗尽）/ NOT_SUPPORT（非 ASCII）
+   */
+  ErrorCode CreateFile(const char* path, FatDirEntry& entry_out);
+
+  /**
+   * @brief 删除文件或空目录（M3b）。
+   *        Delete a file or empty directory (M3b).
+   * @param path 绝对路径 / Absolute path
+   * @return OK / NOT_FOUND / CHECK_ERR（非空目录）
+   */
+  ErrorCode Delete(const char* path);
+
+  // ---- 写入基础设施（FatFile/FatDirWriter 使用）----
+
+  /// 写一个扇区 / Write one sector.
+  ErrorCode WriteSector(uint64_t lba, ConstRawData buf);
+
+  /// 写 FAT 项（两份 FAT 都写，镜像一致性）/ Set a FAT entry (both copies).
+  ErrorCode FatEntrySet(uint32_t clus, uint32_t value);
+
+  /// 分配一个空闲簇（hint 优先，其次 FSInfo 提示）/ Allocate a free cluster.
+  ErrorCode ClusterAlloc(uint32_t& clus, uint32_t hint = 0);
+
+  /// 释放整条簇链 / Free an entire cluster chain.
+  ErrorCode ClusterFreeChain(uint32_t start);
+
+  /// 在链尾追加一簇 / Append one cluster to a chain.
+  ErrorCode ClusterChainAppend(uint32_t last, uint32_t& new_clus);
+
+  /// 统计链上簇数（超限置 overflow）/ Count clusters in a chain.
+  uint32_t CountClusterChain(uint32_t start, uint32_t limit, bool& overflow);
+
+  /// 截断链至保留 keep 簇，其余释放 / Truncate a chain to keep clusters.
+  ErrorCode TruncateChain(uint32_t start, uint32_t keep);
+
+  /// FSInfo 同步（M3b 末统一写）/ Flush FSInfo.
+  ErrorCode SyncFsInfo();
+
+  /**
+   * @brief 按短名+原值定位并回写目录项（写路径支撑）。
+   *        Locate a directory entry by short name and rewrite it (write path).
+   */
+  ErrorCode RewriteDirEntry(uint32_t dir_clus, bool root16, const FatDirEntry& key,
+                            const FatDirEntry& updated);
+
   // ---- 内部服务（FatFile/FatDir 使用，非公开 API）----
 
   /// 读一个扇区到调用方缓冲 / Read one sector into a caller buffer.
@@ -116,6 +166,14 @@ class Fat
   /// FAT16 根目录扇区数（FAT32 为 0）/ FAT16 root sector count (0 for FAT32).
   [[nodiscard]] uint32_t RootSectorCount() const { return root_secs_; }
 
+ public:
+  /// 目录槽位坐标（内部写入定位）/ Directory slot coordinates.
+  struct DirSlot
+  {
+    uint64_t sector_lba = 0;  ///< 所在扇区 / Sector LBA
+    uint32_t entry_idx = 0;   ///< 扇区内条目索引 / Entry index in sector
+  };
+
  private:
   static constexpr uint8_t TYPE_FAT16 = 0;
   static constexpr uint8_t TYPE_FAT32 = 1;
@@ -154,6 +212,11 @@ class Fat
   bool fat_cache_valid_ = false;       ///< FAT 缓存有效 / FAT cache valid
   uint64_t fat_cache_lba_ = 0;         ///< 缓存扇区号 / Cached LBA
   uint32_t fat_cache_data_[128] = {};  ///< 缓存内容（512B）/ Cache content
+
+  bool fs_info_present_ = false;  ///< FSInfo 存在（FAT32）/ FSInfo present (FAT32)
+  uint64_t fs_info_lba_ = 0;      ///< FSInfo 扇区 / FSInfo sector
+  uint32_t free_count_ = 0;       ///< 空闲簇数（内存副本）/ Free cluster count
+  uint32_t next_free_ = 0;        ///< 下一空闲提示 / Next-free hint
 };
 
 }  // namespace LibXR

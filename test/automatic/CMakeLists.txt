@@ -105,8 +105,7 @@ add_executable(
   middleware/message/topic/test_runtime.cpp
   middleware/message/topic/test_topic.cpp
   middleware/ramfs/ramfs/test_ramfs.cpp
-  middleware/fat/fat/test_fat.cpp
-  middleware/terminal/command/test_command.cpp
+  middleware/fat/fat/test_fat.cpp  middleware/terminal/command/test_command.cpp
   middleware/terminal/display/test_display.cpp
   middleware/terminal/input/test_input.cpp
   middleware/terminal/terminal/test_integration.cpp
@@ -137,6 +136,11 @@ add_executable(
   utils/transform/test_transform_euler_orders.cpp
 )
 target_link_libraries(libxr_test PRIVATE xr)
+# FAT 差分测试的临时镜像/文件落在构建目录（/tmp 常有配额限制）。
+# FAT differential scratch files live in the build dir (/tmp is often quota-capped).
+target_compile_definitions(
+  libxr_test PRIVATE "FAT_TEST_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/fat_test/\""
+)
 target_include_directories(
   libxr_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
