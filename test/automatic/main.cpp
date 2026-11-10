@@ -28,6 +28,7 @@ void test_def();
 void test_color();
 void test_crc();
 void test_float_encoder();
+void test_ekf();
 void test_event();
 void test_flag();
 void test_inertia();
@@ -225,6 +226,7 @@ constexpr GroupedTestCase kMainTestCases[] = {
     {"utility_tests", {"crc", &RunVoidEntry<test_crc>, false}},
     {"utility_tests", {"encoder", &RunVoidEntry<test_float_encoder>, false}},
     {"utility_tests", {"cycle_value", &RunVoidEntry<test_cycle_value>, false}},
+    {"utility_tests", {"ekf", &RunVoidEntry<test_ekf>, false}},
     {"utility_tests", {"print", &RunVoidEntry<test_print>, false}},
     {"utility_tests", {"flag", &RunVoidEntry<test_flag>, false}},
 
